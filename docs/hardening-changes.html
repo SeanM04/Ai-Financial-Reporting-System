@@ -1,0 +1,709 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Hardening AI Financial Analytics</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+<style>
+/* Layout: companion to "Inside AI Financial Analytics" — same 1080px column and navy/cyan palette; before/after pairs use the semantic red/green tokens. */
+:root {
+  --bg: #F4F7FA;
+  --surface: #FFFFFF;
+  --sunk: #EAF0F5;
+  --ink: #102231;
+  --ink-soft: #4A5E70;
+  --rule: #D3DDE6;
+  --brand: #0F375A;
+  --signal: #1A7F9F;
+  --signal-soft: #DCEFF5;
+  --warn: #8F5400;
+  --warn-soft: #FBEED6;
+  --bad: #A3242C;
+  --bad-soft: #F8E0E1;
+  --ok: #1C6E45;
+  --ok-soft: #DCF0E4;
+  --f-display: "IBM Plex Sans Condensed", "Arial Narrow", "Segoe UI", sans-serif;
+  --f-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0A1520; --surface: #0F1E2C; --sunk: #142839; --ink: #E2EBF3; --ink-soft: #9DB1C3; --rule: #23394C;
+    --brand: #A3CDEC; --signal: #4FBCD9; --signal-soft: #11313F; --warn: #E6AA4E; --warn-soft: #3A2A11;
+    --bad: #F2878C; --bad-soft: #3B1A1D; --ok: #5DCB94; --ok-soft: #113224; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0A1520; --surface: #0F1E2C; --sunk: #142839; --ink: #E2EBF3; --ink-soft: #9DB1C3; --rule: #23394C;
+  --brand: #A3CDEC; --signal: #4FBCD9; --signal-soft: #11313F; --warn: #E6AA4E; --warn-soft: #3A2A11;
+  --bad: #F2878C; --bad-soft: #3B1A1D; --ok: #5DCB94; --ok-soft: #113224; color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--f-body);
+  font-size: 16px;
+  line-height: 1.6;
+  padding-inline: 16px;
+  padding-block: 0 64px;
+}
+.wrap { max-width: 1080px; margin-inline: auto; }
+.prose { max-width: 68ch; }
+h1, h2, h3, h4 { font-family: var(--f-display); color: var(--brand); text-wrap: balance; line-height: 1.15; margin: 0; }
+h1 { font-size: clamp(2.1rem, 5vw, 3.1rem); font-weight: 700; letter-spacing: -0.01em; }
+h2 { font-size: 1.85rem; font-weight: 600; }
+h3 { font-size: 1.25rem; font-weight: 600; }
+h4 { font-size: 1rem; font-weight: 600; }
+p { margin: 0; }
+code { font-family: var(--f-mono); font-size: 0.86em; background: var(--sunk); padding: 0.08em 0.35em; border-radius: 3px; overflow-wrap: anywhere; }
+a { color: var(--signal); }
+a:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+
+.masthead { padding-block: 48px 28px; display: grid; gap: 14px; border-bottom: 1px solid var(--rule); }
+.eyebrow { font-family: var(--f-mono); font-size: 0.78rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--signal); }
+.lede { font-size: 1.12rem; color: var(--ink-soft); max-width: 66ch; }
+.status { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.status span {
+  font-family: var(--f-mono); font-size: 0.78rem; padding: 4px 10px; border-radius: 3px;
+  border: 1px solid var(--rule); background: var(--surface); color: var(--ink-soft);
+  display: inline-flex; gap: 6px; align-items: center;
+}
+.status b { font-weight: 500; color: var(--ok); }
+.status span.pending b { color: var(--warn); }
+
+nav.toc {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5;
+  background: var(--bg); border-bottom: 1px solid var(--rule);
+  display: flex; flex-wrap: wrap; gap: 4px 18px; padding-block: 10px; font-size: 0.9rem;
+}
+nav.toc a { color: var(--ink-soft); text-decoration: none; font-weight: 500; }
+nav.toc a:hover { color: var(--signal); }
+
+section.block { padding-block: 52px 8px; display: grid; gap: 22px; scroll-margin-top: 56px; }
+.kicker { font-family: var(--f-mono); font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-soft); }
+.head { display: grid; gap: 6px; }
+
+.callout { border-left: 3px solid var(--signal); background: var(--signal-soft); padding: 12px 16px; border-radius: 0 6px 6px 0; font-size: 0.95rem; max-width: 86ch; }
+.callout.warn { border-left-color: var(--warn); background: var(--warn-soft); }
+.callout.bad { border-left-color: var(--bad); background: var(--bad-soft); }
+
+
+/* Tables */
+.tablewrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: 6px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+th, td { text-align: left; vertical-align: top; padding: 9px 12px; border-bottom: 1px solid var(--rule); }
+th { font-family: var(--f-mono); font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-soft); font-weight: 500; background: var(--sunk); }
+tr:last-child td { border-bottom: 0; }
+td { color: var(--ink-soft); }
+td:first-child { color: var(--ink); font-weight: 500; }
+tr.group td {
+  background: var(--sunk); font-family: var(--f-mono); font-size: 0.72rem; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--signal); font-weight: 500; padding-block: 6px;
+}
+.summary td:nth-child(2) { border-left: 3px solid var(--bad-soft); }
+.summary td:nth-child(3) { border-left: 3px solid var(--ok-soft); color: var(--ink); }
+.summary td.num { font-family: var(--f-mono); color: var(--brand); width: 2.5rem; font-variant-numeric: tabular-nums; }
+.summary td:last-child { font-size: 0.82rem; }
+.pill { display: inline-block; font-family: var(--f-mono); font-size: 0.74rem; padding: 1px 8px; border-radius: 999px; white-space: nowrap; }
+.pill.ok { background: var(--ok-soft); color: var(--ok); }
+.pill.no { background: var(--bad-soft); color: var(--bad); }
+.pill.mid { background: var(--warn-soft); color: var(--warn); }
+.pill.info { background: var(--signal-soft); color: var(--signal); }
+
+/* Request gates */
+ol.gates { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+ol.gates > li {
+  display: grid; grid-template-columns: 2.4rem minmax(0, 1fr) auto; gap: 14px; align-items: start;
+  background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 12px 16px;
+}
+.num {
+  font-family: var(--f-mono); font-weight: 500; font-size: 0.95rem; color: var(--brand);
+  width: 2.4rem; height: 2.4rem; display: grid; place-items: center;
+  border: 1.5px solid var(--brand); border-radius: 4px; font-variant-numeric: tabular-nums;
+}
+.gate-body { display: grid; gap: 4px; min-width: 0; }
+.gate-body p { font-size: 0.93rem; color: var(--ink-soft); max-width: 78ch; }
+.gate-out { display: grid; gap: 4px; justify-items: end; text-align: right; }
+.gate-out small { font-size: 0.74rem; color: var(--ink-soft); font-family: var(--f-mono); }
+ol.gates > li.pass { border-color: var(--ok); }
+
+/* Matrix */
+.matrix td:not(:first-child), .matrix th:not(:first-child) { text-align: center; }
+.matrix td small { display: block; font-size: 0.74rem; color: var(--ink-soft); margin-top: 2px; }
+
+/* Figures */
+.figure { background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 16px; overflow-x: auto; }
+.figure svg { display: block; width: 100%; height: auto; }
+.figure .wide { min-width: 660px; }
+.figure .chart { min-width: 600px; }
+.figure figcaption { font-size: 0.85rem; color: var(--ink-soft); margin-top: 10px; }
+figure { margin: 0; }
+.d-box { fill: var(--surface); stroke: var(--rule); stroke-width: 1.5; }
+.d-box.main { fill: var(--sunk); stroke: var(--brand); }
+.d-box.ext { fill: var(--signal-soft); stroke: var(--signal); }
+.d-inner { fill: var(--surface); stroke: var(--rule); stroke-width: 1; }
+.d-title { fill: var(--brand); font-family: var(--f-display); font-weight: 600; font-size: 16px; }
+.d-text { fill: var(--ink-soft); font-family: var(--f-body); font-size: 12.5px; }
+.d-mono { fill: var(--ink); font-family: var(--f-mono); font-size: 11.5px; }
+.d-line { stroke: var(--signal); stroke-width: 1.75; fill: none; }
+.d-head { fill: var(--signal); }
+.c-label { fill: var(--ink); font-family: var(--f-body); font-size: 13px; }
+.c-sub { fill: var(--ink-soft); font-family: var(--f-mono); font-size: 11px; }
+.c-tick { fill: var(--ink-soft); font-family: var(--f-mono); font-size: 11px; }
+.c-grid { stroke: var(--rule); stroke-width: 1; }
+.c-axis { stroke: var(--ink-soft); stroke-width: 1; }
+.c-ai { fill: var(--warn); }
+.c-limit { fill: var(--signal); }
+.c-val { font-family: var(--f-mono); font-size: 11.5px; font-weight: 500; }
+.c-val.in { fill: var(--surface); }
+.c-val.out { fill: var(--ink); }
+.c-guide { stroke: var(--warn); stroke-width: 1.25; stroke-dasharray: 4 4; }
+
+.split { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 14px; }
+.note { border: 1px solid var(--rule); background: var(--surface); border-radius: 6px; padding: 14px 16px; display: grid; gap: 8px; min-width: 0; align-content: start; }
+.note h4 { font-size: 0.98rem; }
+.note p, .note li { font-size: 0.93rem; color: var(--ink-soft); }
+.note ul { margin: 0; padding-left: 1.1em; display: grid; gap: 3px; }
+.note.before { border-top: 3px solid var(--bad); }
+.note.after { border-top: 3px solid var(--ok); }
+.tag { font-family: var(--f-mono); font-size: 0.7rem; letter-spacing: 0.08em; text-transform: uppercase; }
+.note.before .tag { color: var(--bad); }
+.note.after .tag { color: var(--ok); }
+
+pre.code {
+  margin: 0; background: var(--sunk); border: 1px solid var(--rule); border-radius: 6px;
+  padding: 14px 16px; overflow-x: auto; font-family: var(--f-mono); font-size: 0.8rem; line-height: 1.6; color: var(--ink);
+}
+pre.code .c { color: var(--ink-soft); }
+pre.code .k { color: var(--signal); }
+
+.vars td:first-child { font-family: var(--f-mono); font-size: 0.8rem; font-weight: 400; white-space: nowrap; }
+.vars td:nth-child(2) { font-family: var(--f-mono); font-size: 0.8rem; white-space: nowrap; color: var(--signal); }
+.files td:first-child { font-family: var(--f-mono); font-size: 0.8rem; font-weight: 400; overflow-wrap: anywhere; }
+.files td:nth-child(2) { white-space: nowrap; }
+.tests td:nth-child(2) { font-family: var(--f-mono); color: var(--brand); text-align: right; font-variant-numeric: tabular-nums; width: 3rem; }
+.tests tfoot td { font-weight: 600; color: var(--ink); background: var(--sunk); border-top: 1px solid var(--rule); }
+
+ul.smoke { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+ul.smoke li { display: grid; grid-template-columns: 4.2rem minmax(0, 1fr); gap: 12px; align-items: baseline; font-size: 0.92rem; color: var(--ink-soft); }
+ul.smoke li .pill { justify-self: start; }
+
+ul.open { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; max-width: 86ch; }
+ul.open li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; align-items: start; background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 12px 14px; font-size: 0.94rem; color: var(--ink-soft); }
+ul.open strong { color: var(--ink); font-weight: 600; }
+
+footer { margin-top: 56px; padding-top: 16px; border-top: 1px solid var(--rule); font-size: 0.84rem; color: var(--ink-soft); }
+
+@media (max-width: 560px) {
+  ol.gates > li { grid-template-columns: 2.4rem minmax(0, 1fr); }
+  .gate-out { grid-column: 2; justify-items: start; text-align: left; }
+  h2 { font-size: 1.55rem; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div class="eyebrow">Change report · 5 Oct 2026</div>
+    <h1>Hardening AI Financial Analytics</h1>
+    <p class="lede">What was changed to move the app from "works on one machine" towards something safe to put on a network: who can reach what, how abuse is limited, how settings and deployment work now, and what is still open. For how the system works end to end after these changes, see <a href="how-it-works.html">Inside AI Financial Analytics</a>.</p>
+    <div class="status">
+      <span><b>36 / 36</b> backend tests pass</span>
+      <span><b>0 errors</b> in check --deploy</span>
+      <span><b>7 / 7</b> live checks through the Vite proxy</span>
+      <span><b>Django 5.2.17</b> LTS</span>
+    </div>
+  </header>
+
+  <nav class="toc" aria-label="Sections">
+    <a href="#summary">Summary</a>
+    <a href="#gates">Request checks</a>
+    <a href="#access">Who can do what</a>
+    <a href="#limits">Limits and timeouts</a>
+    <a href="#settings">Settings</a>
+    <a href="#deploy">Deployment</a>
+    <a href="#tests">Tests</a>
+    <a href="#files">Files</a>
+    <a href="#open">Still open</a>
+  </nav>
+
+  <!-- SUMMARY -->
+  <section class="block" id="summary">
+    <div class="head">
+      <div class="kicker">Part 1</div>
+      <h2>What changed</h2>
+    </div>
+    <p class="prose">The first three rows were fixed earlier in the session. The numbered rows are the nine must-fix items from the production review, in the order they were listed.</p>
+    <div class="tablewrap">
+      <table class="summary">
+        <thead><tr><th></th><th>Area</th><th>Before</th><th>Now</th><th>Proved by</th></tr></thead>
+        <tbody>
+          <tr class="group"><td colspan="5">Earlier fixes</td></tr>
+          <tr><td class="num"></td><td>Login</td><td>Username only, although the form says "Username or Email"</td><td>Username or email, any capitalisation; accounts that share an email are each tried</td><td>6 login tests</td></tr>
+          <tr><td class="num"></td><td>AI labelling</td><td>Fallback text marked as AI with no warning; no API key meant an empty report</td><td>Every result says whether AI wrote it; fallback shows the reason; regeneration keeps existing text when AI fails</td><td>7 AI tests</td></tr>
+          <tr><td class="num"></td><td>Database choice</td><td><code>.env</code> read too late, so migrations went to SQLite</td><td><code>.env</code> read first; your PostgreSQL database is used and migrated</td><td>4 settings tests</td></tr>
+          <tr class="group"><td colspan="5">Must-fix list</td></tr>
+          <tr><td class="num">1</td><td>API access</td><td>Report list, detail, export and upload open to anyone; list returned every report and every report ID</td><td>Login required; users see only their own reports; staff see all; report ID lists removed</td><td>6 access tests, live check</td></tr>
+          <tr><td class="num">2</td><td>Data in git</td><td>Database, log and two dump files committed and pushed</td><td>Removed from tracking and ignored; kept on local disks</td><td><code>git status</code></td></tr>
+          <tr><td class="num">3</td><td>Abuse limits</td><td>No login throttling; daily AI quota only displayed</td><td>Sign-in lockout; 30 AI requests per user per hour; daily quota enforced</td><td>4 limit tests</td></tr>
+          <tr><td class="num">4</td><td>Production security</td><td><code>DEBUG=True</code>, a fallback secret key in the code, CSRF checks off, exception text sent to browsers</td><td>Real secret key required; HTTPS, secure cookies and HSTS; CSRF on; 500 details hidden</td><td><code>check --deploy</code>, 7 tests</td></tr>
+          <tr><td class="num">5</td><td>Django version</td><td>5.0.0, unsupported since April 2025</td><td>5.2.17, long-term support</td><td>Full test suite</td></tr>
+          <tr><td class="num">6</td><td>WSGI startup</td><td>Pointed at a settings module that doesn't exist</td><td>One module chooses settings for manage.py, WSGI, ASGI and Celery</td><td>WSGI load test</td></tr>
+          <tr><td class="num">7</td><td>Timeouts</td><td>OpenAI could wait up to 10 minutes; Gunicorn's default kills requests at 30 s</td><td>OpenAI gives up at 60 s per attempt; every layer allows 300 s</td><td>Timeout chart below</td></tr>
+          <tr><td class="num">8</td><td>Several server processes</td><td>Each process kept its own report copies for 7 days, and its own locks</td><td>Reports always read from the database; counters and locks in a shared cache</td><td>2 store tests</td></tr>
+          <tr><td class="num">9</td><td>Deployment</td><td>Docker instructions for a stack that no longer exists; no CI</td><td>Rewritten DEPLOYMENT.md, Gunicorn config, cron jobs, backups, CI workflow</td><td>CI workflow</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="callout warn">Two problems surfaced while making these changes. Turning CSRF back on would have broken every real upload with a 500 error, because the upload view read the request body after the CSRF check had already consumed it; a new test caught it and the view was fixed. The browser also gave AI requests 180 seconds, the same as the backend's worst case, so it could give up just before a report finished. It now waits 300 seconds, matching the server.</p>
+  </section>
+
+
+  <!-- GATES -->
+  <section class="block" id="gates">
+    <div class="head">
+      <div class="kicker">Part 2</div>
+      <h2>How a request is checked now</h2>
+    </div>
+    <p class="prose">Every API call passes these checks in order. The first one that fails decides the response. Before these changes, most report endpoints went straight to step 6.</p>
+    <ol class="gates">
+      <li>
+        <span class="num">1</span>
+        <div class="gate-body">
+          <h4>HTTPS and host name</h4>
+          <p>In production, plain HTTP is redirected to HTTPS and requests for host names outside <code>ALLOWED_HOSTS</code> are refused. The health check is exempt so uptime monitors keep working.</p>
+        </div>
+        <div class="gate-out"><span class="pill info">301 redirect</span><small>DEBUG=False only</small></div>
+      </li>
+      <li>
+        <span class="num">2</span>
+        <div class="gate-body">
+          <h4>CSRF token and origin</h4>
+          <p>Any request that changes something must send the <code>csrftoken</code> cookie back in an <code>X-CSRFToken</code> header, and its <code>Origin</code> must be trusted. The frontend does this automatically. Signing in is the only exemption, since no token exists yet.</p>
+        </div>
+        <div class="gate-out"><span class="pill no">403</span><small>POST, PUT, DELETE</small></div>
+      </li>
+      <li>
+        <span class="num">3</span>
+        <div class="gate-body">
+          <h4>Signed in</h4>
+          <p>Every report, upload and AI endpoint needs a session. Only sign-in, the health check and a test ping are open.</p>
+        </div>
+        <div class="gate-out"><span class="pill no">401</span><small>403 on some DRF routes</small></div>
+      </li>
+      <li>
+        <span class="num">4</span>
+        <div class="gate-body">
+          <h4>Allowed to see this report</h4>
+          <p>The report must belong to the user, or the user must be staff. Anyone else gets "Report not found", so the reply doesn't confirm that the report exists.</p>
+        </div>
+        <div class="gate-out"><span class="pill no">404</span><small>report routes</small></div>
+      </li>
+      <li>
+        <span class="num">5</span>
+        <div class="gate-body">
+          <h4>Within the rate limits</h4>
+          <p>Sign-in is blocked after repeated failures, and AI requests are capped per user per hour. The reply says how many minutes to wait and sets <code>Retry-After</code>.</p>
+        </div>
+        <div class="gate-out"><span class="pill mid">429</span><small>sign-in and AI routes</small></div>
+      </li>
+      <li class="pass">
+        <span class="num">6</span>
+        <div class="gate-body">
+          <h4>The endpoint runs</h4>
+          <p>For AI work it first counts the request against the daily quota, then calls OpenAI with a 60-second timeout. If the quota is used up or OpenAI fails, a rule-based report is built and clearly labelled.</p>
+        </div>
+        <div class="gate-out"><span class="pill ok">200</span><small>or labelled fallback</small></div>
+      </li>
+      <li>
+        <span class="num">7</span>
+        <div class="gate-body">
+          <h4>Errors leave nothing behind</h4>
+          <p>With <code>DEBUG=False</code>, any 500 response is logged in full on the server and replaced with a generic message for the browser. 4xx and 503 messages are kept, because they tell the user what to fix.</p>
+        </div>
+        <div class="gate-out"><span class="pill info">500 generic</span><small>DEBUG=False only</small></div>
+      </li>
+    </ol>
+  </section>
+
+  <!-- ACCESS -->
+  <section class="block" id="access">
+    <div class="head">
+      <div class="kicker">Part 3</div>
+      <h2>Who can do what</h2>
+    </div>
+    <p class="prose">Reports belong to the person who uploaded them. Reports from before this change have no owner, so only staff accounts can see them. Make an account staff in the Django admin or with <code>createsuperuser</code>.</p>
+    <div class="tablewrap">
+      <table class="matrix">
+        <thead><tr><th>Action</th><th>Not signed in</th><th>Signed-in user</th><th>Staff</th></tr></thead>
+        <tbody>
+          <tr><td>Health check</td><td><span class="pill ok">yes</span></td><td><span class="pill ok">yes</span></td><td><span class="pill ok">yes</span></td></tr>
+          <tr><td>Sign in</td><td><span class="pill ok">yes</span><small>with lockout</small></td><td><span class="pill ok">yes</span></td><td><span class="pill ok">yes</span></td></tr>
+          <tr><td>List reports</td><td><span class="pill no">no</span></td><td><span class="pill info">own</span></td><td><span class="pill ok">own + unowned</span></td></tr>
+          <tr><td>Open or export a report</td><td><span class="pill no">no</span></td><td><span class="pill info">own</span></td><td><span class="pill ok">any</span></td></tr>
+          <tr><td>Upload and generate</td><td><span class="pill no">no</span></td><td><span class="pill ok">yes</span><small>30 per hour</small></td><td><span class="pill ok">yes</span><small>30 per hour</small></td></tr>
+          <tr><td>Regenerate a section</td><td><span class="pill no">no</span></td><td><span class="pill info">own</span></td><td><span class="pill ok">any</span></td></tr>
+          <tr><td>Run retention cleanup</td><td><span class="pill no">no</span></td><td><span class="pill info">own reports</span></td><td><span class="pill ok">own + unowned</span></td></tr>
+          <tr><td>Edit master prompts and templates</td><td><span class="pill no">no</span></td><td><span class="pill no">no</span></td><td><span class="pill ok">yes</span></td></tr>
+          <tr><td>Bulk archive or delete</td><td><span class="pill no">no</span></td><td><span class="pill no">no</span></td><td><span class="pill ok">yes</span></td></tr>
+          <tr><td>Test the OpenAI connection</td><td><span class="pill no">no</span></td><td><span class="pill no">no</span></td><td><span class="pill ok">yes</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- LIMITS -->
+  <section class="block" id="limits">
+    <div class="head">
+      <div class="kicker">Part 4</div>
+      <h2>Limits and timeouts</h2>
+    </div>
+    <div class="tablewrap">
+      <table class="vars">
+        <thead><tr><th>Limit</th><th>Default</th><th>What happens</th></tr></thead>
+        <tbody>
+          <tr><td>LOGIN_MAX_FAILURES</td><td>5</td><td>Failed sign-ins for one account from one address before a lockout. A successful sign-in resets the count.</td></tr>
+          <tr><td>LOGIN_MAX_FAILURES_PER_IP</td><td>50</td><td>Failed sign-ins from one address across all accounts, which stops password spraying.</td></tr>
+          <tr><td>LOGIN_LOCKOUT_SECONDS</td><td>900</td><td>How long the lockout lasts (15 minutes).</td></tr>
+          <tr><td>AI_REQUESTS_PER_USER_PER_HOUR</td><td>30</td><td>Uploads, report generation and section regeneration per user. The 31st gets a 429.</td></tr>
+          <tr><td>OPENAI_DAILY_QUOTA_LIMIT</td><td>1000</td><td>OpenAI calls per day for everyone together. Past it, reports fall back to rule-based text with a warning. Resets at midnight UTC.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <figure class="figure">
+      <svg class="chart" viewBox="0 0 760 236" role="img" aria-labelledby="tb-t tb-d">
+        <title id="tb-t">Timeout budget</title>
+        <desc id="tb-d">One OpenAI attempt is capped at 60 seconds and the worst case with retries is 180 seconds. The browser, Gunicorn and nginx each allow 300 seconds, so an AI request always finishes or falls back before anything in front of it gives up.</desc>
+        <!-- scale: x = 250 + seconds * 1.6 (0 s = 250, 300 s = 730) -->
+        <line class="c-grid" x1="250" y1="12" x2="250" y2="196"/>
+        <line class="c-grid" x1="346" y1="12" x2="346" y2="196"/>
+        <line class="c-grid" x1="442" y1="12" x2="442" y2="196"/>
+        <line class="c-grid" x1="538" y1="12" x2="538" y2="196"/>
+        <line class="c-grid" x1="634" y1="12" x2="634" y2="196"/>
+        <line class="c-grid" x1="730" y1="12" x2="730" y2="196"/>
+        <line class="c-axis" x1="250" y1="196" x2="730" y2="196"/>
+        <text class="c-tick" x="250" y="214" text-anchor="middle">0</text>
+        <text class="c-tick" x="346" y="214" text-anchor="middle">60</text>
+        <text class="c-tick" x="442" y="214" text-anchor="middle">120</text>
+        <text class="c-tick" x="538" y="214" text-anchor="middle">180</text>
+        <text class="c-tick" x="634" y="214" text-anchor="middle">240</text>
+        <text class="c-tick" x="730" y="214" text-anchor="end">300 s</text>
+
+        <text class="c-label" x="0" y="31">One OpenAI attempt</text>
+        <text class="c-sub" x="0" y="45">OPENAI_TIMEOUT_SECONDS</text>
+        <rect class="c-ai" x="250" y="20" width="96" height="20" rx="2"/>
+        <text class="c-val out" x="354" y="34">60 s</text>
+
+        <text class="c-label" x="0" y="67">OpenAI worst case</text>
+        <text class="c-sub" x="0" y="81">60 s × (1 + 2 retries)</text>
+        <rect class="c-ai" x="250" y="56" width="288" height="20" rx="2"/>
+        <text class="c-val out" x="546" y="70">180 s</text>
+
+        <text class="c-label" x="0" y="103">Browser waits (AI requests)</text>
+        <text class="c-sub" x="0" y="117">api.js, was 180 s</text>
+        <rect class="c-limit" x="250" y="92" width="480" height="20" rx="2"/>
+        <text class="c-val in" x="722" y="106" text-anchor="end">300 s</text>
+
+        <text class="c-label" x="0" y="139">Gunicorn worker</text>
+        <text class="c-sub" x="0" y="153">gunicorn.conf.py</text>
+        <rect class="c-limit" x="250" y="128" width="480" height="20" rx="2"/>
+        <text class="c-val in" x="722" y="142" text-anchor="end">300 s</text>
+
+        <text class="c-label" x="0" y="175">nginx read timeout</text>
+        <text class="c-sub" x="0" y="189">proxy_read_timeout</text>
+        <rect class="c-limit" x="250" y="164" width="480" height="20" rx="2"/>
+        <text class="c-val in" x="722" y="178" text-anchor="end">300 s</text>
+
+        <line class="c-guide" x1="538" y1="12" x2="538" y2="196"/>
+      </svg>
+      <figcaption>Amber bars are how long OpenAI can take; blue bars are how long each layer in front of it will wait. Because the worst case (dashed line) ends well before every limit, a slow OpenAI reply turns into a labelled fallback report instead of a dropped connection.</figcaption>
+    </figure>
+  </section>
+
+  <!-- SETTINGS -->
+  <section class="block" id="settings">
+    <div class="head">
+      <div class="kicker">Part 5</div>
+      <h2>Settings and shared state</h2>
+    </div>
+    <p class="prose">The two settings files had drifted apart, for example in their DRF defaults and their DEBUG defaults. Everything except the database now lives in one shared file, so security settings can't differ between SQLite and PostgreSQL.</p>
+<pre class="code"><span class="c">manage.py · wsgi.py · asgi.py · celery.py</span>
+        │
+        └── <span class="k">financial_analytics/env.py</span>      loads backend/.env, then picks:
+              ├── settings_postgres   <span class="c">when DB_NAME or DATABASE_URL is set</span>
+              └── settings_sqlite     <span class="c">otherwise (local development, DEBUG on by default)</span>
+                     │
+                     └── both import <span class="k">settings_base.py</span>   <span class="c">everything except DATABASES</span></pre>
+
+    <div class="split">
+      <div class="note">
+        <h4>When <code>DEBUG=False</code></h4>
+        <ul>
+          <li>Startup fails unless <code>SECRET_KEY</code> is a real generated key</li>
+          <li>HTTP redirects to HTTPS (health check exempt)</li>
+          <li>Session and CSRF cookies are HTTPS-only</li>
+          <li>HSTS on, starting at 1 hour; raise it once HTTPS is confirmed</li>
+          <li>500 responses hide their details</li>
+        </ul>
+      </div>
+      <div class="note">
+        <h4>When <code>BEHIND_PROXY=true</code></h4>
+        <ul>
+          <li>Trusts nginx's <code>X-Forwarded-Proto</code> header, so HTTPS is detected correctly and the redirect doesn't loop</li>
+          <li>Uses <code>X-Forwarded-For</code> as the client address for sign-in limits</li>
+        </ul>
+      </div>
+      <div class="note">
+        <h4>Origins</h4>
+        <ul>
+          <li><code>CORS_ALLOWED_ORIGINS</code>: who may call the API</li>
+          <li><code>CSRF_TRUSTED_ORIGINS</code>: who may send POSTs; defaults to the CORS list, which includes the Vite dev server on port 5173</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="split">
+      <div class="note before">
+        <span class="tag">Before</span>
+        <h4>Each server process had its own memory cache</h4>
+        <ul>
+          <li>Reports were copied into each process and kept for up to 7 days</li>
+          <li>An edit made through one process was invisible to the others</li>
+          <li>The "one regeneration at a time" lock only worked within one process</li>
+        </ul>
+      </div>
+      <div class="note after">
+        <span class="tag">Now</span>
+        <h4>One source of truth, one shared cache</h4>
+        <ul>
+          <li>Reports are always read from the database</li>
+          <li>Rate limits, quota counters and locks live in a shared cache: a database table created by <code>migrate</code>, or Redis when <code>REDIS_URL</code> is set</li>
+          <li>The AI usage page now shows real numbers, because the counters are finally being written</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3>New settings in <code>backend/.env</code></h3>
+    <div class="tablewrap">
+      <table class="vars">
+        <thead><tr><th>Name</th><th>Default</th><th>Purpose</th></tr></thead>
+        <tbody>
+          <tr><td>CSRF_TRUSTED_ORIGINS</td><td>CORS list</td><td>Origins allowed to send POST requests</td></tr>
+          <tr><td>BEHIND_PROXY</td><td>false</td><td>Set to true behind nginx</td></tr>
+          <tr><td>SECURE_SSL_REDIRECT</td><td>true</td><td>Redirect HTTP to HTTPS when DEBUG is off</td></tr>
+          <tr><td>SECURE_HSTS_SECONDS</td><td>3600</td><td>How long browsers insist on HTTPS</td></tr>
+          <tr><td>SECURE_HSTS_INCLUDE_SUBDOMAINS / _PRELOAD</td><td>false</td><td>Opt-in; depends on your domain</td></tr>
+          <tr><td>REDIS_URL</td><td>none</td><td>Use Redis instead of the cache table</td></tr>
+          <tr><td>OPENAI_TIMEOUT_SECONDS</td><td>60</td><td>Per-attempt OpenAI timeout</td></tr>
+          <tr><td>OPENAI_MAX_RETRIES</td><td>2</td><td>Retries after a failed OpenAI attempt</td></tr>
+          <tr><td>AI_REQUESTS_PER_USER_PER_HOUR</td><td>30</td><td>Per-user AI cap</td></tr>
+          <tr><td>LOGIN_MAX_FAILURES · _PER_IP · LOCKOUT_SECONDS</td><td>5 · 50 · 900</td><td>Sign-in lockout</td></tr>
+          <tr><td>LOG_DIR · LOG_LEVEL</td><td>backend/logs · INFO</td><td>Where logs go and how detailed they are</td></tr>
+          <tr><td>GUNICORN_WORKERS · _THREADS · _TIMEOUT</td><td>auto · 4 · 300</td><td>Server sizing</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- DEPLOY -->
+  <section class="block" id="deploy">
+    <div class="head">
+      <div class="kicker">Part 6</div>
+      <h2>Deployment</h2>
+    </div>
+    <p class="prose">DEPLOYMENT.md now describes this setup step by step: the database, backend, frontend build, Gunicorn service, nginx with HTTPS, scheduled jobs, monitoring and updates. No Docker or Celery is needed.</p>
+    <figure class="figure">
+      <svg class="wide" viewBox="0 0 900 300" role="img" aria-labelledby="dp-t dp-d">
+        <title id="dp-t">Production layout</title>
+        <desc id="dp-d">The browser talks to nginx over HTTPS. nginx serves the built frontend and forwards API calls to Gunicorn running Django. Django uses PostgreSQL, which also holds the shared cache table, and calls OpenAI. Cron runs cleanup, session cleanup and backups each night.</desc>
+        <defs>
+          <marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path class="d-head" d="M0,0 L10,5 L0,10 z"/>
+          </marker>
+        </defs>
+        <rect class="d-box" x="10" y="110" width="150" height="80" rx="6"/>
+        <text class="d-title" x="85" y="140" text-anchor="middle">Browser</text>
+        <text class="d-text" x="85" y="160" text-anchor="middle">one origin, HTTPS</text>
+        <text class="d-mono" x="85" y="177" text-anchor="middle">session + CSRF</text>
+
+        <rect class="d-box main" x="200" y="40" width="200" height="220" rx="6"/>
+        <text class="d-title" x="300" y="66" text-anchor="middle">nginx</text>
+        <text class="d-text" x="300" y="84" text-anchor="middle">TLS via certbot</text>
+        <rect class="d-inner" x="212" y="98" width="176" height="30" rx="3"/>
+        <text class="d-mono" x="300" y="117" text-anchor="middle">/ → frontend/dist</text>
+        <rect class="d-inner" x="212" y="134" width="176" height="30" rx="3"/>
+        <text class="d-mono" x="300" y="153" text-anchor="middle">/static/ → staticfiles</text>
+        <rect class="d-inner" x="212" y="170" width="176" height="30" rx="3"/>
+        <text class="d-mono" x="300" y="189" text-anchor="middle">/api/, /admin/ → :8000</text>
+        <rect class="d-inner" x="212" y="206" width="176" height="40" rx="3"/>
+        <text class="d-mono" x="300" y="223" text-anchor="middle">300 s read timeout</text>
+        <text class="d-mono" x="300" y="239" text-anchor="middle">50 MB uploads</text>
+
+        <rect class="d-box main" x="440" y="40" width="200" height="220" rx="6"/>
+        <text class="d-title" x="540" y="66" text-anchor="middle">Gunicorn + Django</text>
+        <text class="d-text" x="540" y="84" text-anchor="middle">threaded workers, 300 s</text>
+        <rect class="d-inner" x="452" y="98" width="176" height="30" rx="3"/>
+        <text class="d-mono" x="540" y="117" text-anchor="middle">request checks</text>
+        <rect class="d-inner" x="452" y="134" width="176" height="30" rx="3"/>
+        <text class="d-mono" x="540" y="153" text-anchor="middle">upload + reports</text>
+        <rect class="d-inner" x="452" y="170" width="176" height="30" rx="3"/>
+        <text class="d-mono" x="540" y="189" text-anchor="middle">OpenAI 60 s × 3</text>
+        <rect class="d-inner" x="452" y="206" width="176" height="40" rx="3"/>
+        <text class="d-mono" x="540" y="223" text-anchor="middle">logs to LOG_DIR</text>
+        <text class="d-mono" x="540" y="239" text-anchor="middle">health: /api/health/</text>
+
+        <rect class="d-box" x="680" y="20" width="210" height="80" rx="6"/>
+        <text class="d-title" x="785" y="47" text-anchor="middle">PostgreSQL</text>
+        <text class="d-text" x="785" y="66" text-anchor="middle">reports, users, prompts</text>
+        <text class="d-mono" x="785" y="84" text-anchor="middle">+ django_cache table</text>
+
+        <rect class="d-box ext" x="680" y="115" width="210" height="62" rx="6"/>
+        <text class="d-title" x="785" y="141" text-anchor="middle">OpenAI API</text>
+        <text class="d-text" x="785" y="161" text-anchor="middle">daily quota enforced</text>
+
+        <rect class="d-box" x="680" y="192" width="210" height="88" rx="6"/>
+        <text class="d-title" x="785" y="216" text-anchor="middle">cron, nightly</text>
+        <text class="d-mono" x="785" y="235" text-anchor="middle">02:00 cleanup_old_data</text>
+        <text class="d-mono" x="785" y="252" text-anchor="middle">02:30 clearsessions</text>
+        <text class="d-mono" x="785" y="269" text-anchor="middle">03:00 pg_dump backup</text>
+
+        <line class="d-line" x1="160" y1="150" x2="198" y2="150" marker-end="url(#ah2)"/>
+        <line class="d-line" x1="400" y1="185" x2="438" y2="185" marker-end="url(#ah2)"/>
+        <path class="d-line" d="M640 90 L660 90 L660 60 L678 60" marker-end="url(#ah2)"/>
+        <line class="d-line" x1="640" y1="146" x2="678" y2="146" marker-end="url(#ah2)"/>
+      </svg>
+      <figcaption>The frontend and API must share one origin, because sign-in uses a session cookie and a CSRF token. The cron jobs write to PostgreSQL directly.</figcaption>
+    </figure>
+    <div class="split">
+      <div class="note">
+        <h4>New files</h4>
+        <ul>
+          <li><code>backend/gunicorn.conf.py</code>: threaded workers, 300 s timeout, sizes from env</li>
+          <li><code>.github/workflows/ci.yml</code>: backend tests on PostgreSQL 16, migration check, frontend build</li>
+          <li><code>backend/.env.example</code>: rewritten with every setting and production notes</li>
+        </ul>
+      </div>
+      <div class="note">
+        <h4>Commands that changed</h4>
+        <ul>
+          <li><code>python manage.py migrate</code> now also creates the cache table</li>
+          <li>Build the frontend with <code>npm run build-only</code> until the existing type errors are fixed</li>
+          <li>Run <code>python manage.py check --deploy</code> before going live</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- TESTS -->
+  <section class="block" id="tests">
+    <div class="head">
+      <div class="kicker">Part 7</div>
+      <h2>How the changes were checked</h2>
+    </div>
+    <p class="prose"><code>backend/analytics/tests.py</code> was empty at the start of the session. It now holds 36 tests. They run against a temporary PostgreSQL database and mock OpenAI, so they cost nothing: <code>python manage.py test analytics</code>.</p>
+    <div class="tablewrap">
+      <table class="tests">
+        <thead><tr><th>Group</th><th>Tests</th><th>What they prove</th></tr></thead>
+        <tbody>
+          <tr><td>Sign-in</td><td>6</td><td>Username, email, mixed-case email, a shared email, wrong password and unknown email</td></tr>
+          <tr><td>Sign-in lockout</td><td>2</td><td>Locks after repeated failures; a successful sign-in clears earlier failures</td></tr>
+          <tr><td>CSRF</td><td>4</td><td>No token is refused; a token passes; the Vite dev origin is trusted; a foreign origin is refused even with a token</td></tr>
+          <tr><td>Report access</td><td>6</td><td>Anonymous calls get 401; users list only their own reports; other people's reports return 404; owners can read and export; unowned reports are staff-only; uploads belong to the uploader</td></tr>
+          <tr><td>AI labelling</td><td>4</td><td>Missing key and API errors produce labelled fallbacks; real AI output is labelled as AI</td></tr>
+          <tr><td>Upload labelling</td><td>2</td><td>A fallback upload warns and traces as "fallback"; an AI upload traces as the model</td></tr>
+          <tr><td>Section regeneration</td><td>1</td><td>A fallback result never replaces the existing section</td></tr>
+          <tr><td>AI limits</td><td>2</td><td>The per-user hourly cap returns 429; the daily quota stops OpenAI calls</td></tr>
+          <tr><td>Error details</td><td>3</td><td>500 details are hidden in production, other statuses keep their message, and debug mode still shows details</td></tr>
+          <tr><td>Report store</td><td>2</td><td>Reads see writes made by other processes; saving without a user keeps the owner</td></tr>
+          <tr><td>Settings and WSGI</td><td>4</td><td>PostgreSQL is picked when DB_NAME is set, SQLite otherwise, an explicit choice wins, and the WSGI app loads</td></tr>
+        </tbody>
+        <tfoot><tr><td>Total</td><td>36</td><td>All passing</td></tr></tfoot>
+      </table>
+    </div>
+
+    <h3>Live check through the Vite dev server</h3>
+    <p class="prose">With the backend running, a script made the same calls a browser would, through <code>localhost:5173</code>, using a temporary account that was deleted afterwards.</p>
+    <ul class="smoke">
+      <li><span class="pill ok">401</span><span>Report list without signing in is refused</span></li>
+      <li><span class="pill ok">200</span><span>Sign-in with an email address works and sets the CSRF cookie</span></li>
+      <li><span class="pill ok">200</span><span><code>/api/auth/me/</code> confirms the session</span></li>
+      <li><span class="pill ok">200</span><span>The report list returns only the user's own reports, with no ID list</span></li>
+      <li><span class="pill ok">403</span><span>A POST without the CSRF token is refused</span></li>
+      <li><span class="pill ok">400</span><span>The same POST with the token gets past CSRF and fails validation as expected ("No file provided")</span></li>
+      <li><span class="pill ok">200</span><span>The health check stays open</span></li>
+    </ul>
+    <p class="prose"><code>manage.py check --deploy</code> with production settings reports no errors. The two remaining warnings are the opt-in HSTS subdomain and preload settings, which depend on your domain.</p>
+  </section>
+
+  <!-- FILES -->
+  <section class="block" id="files">
+    <div class="head">
+      <div class="kicker">Part 8</div>
+      <h2>Files changed</h2>
+    </div>
+    <div class="tablewrap">
+      <table class="files">
+        <thead><tr><th>File</th><th>Change</th><th>Why</th></tr></thead>
+        <tbody>
+          <tr class="group"><td colspan="3">backend/analytics</td></tr>
+          <tr><td>api/access.py</td><td><span class="pill ok">new</span></td><td>Sign-in, report-owner, staff and AI rate-limit checks shared by all views</td></tr>
+          <tr><td>api/auth.py</td><td><span class="pill info">changed</span></td><td>Email sign-in, failed sign-in lockout, CSRF cookie on <code>/auth/me/</code></td></tr>
+          <tr><td>api/authentication.py</td><td><span class="pill no">deleted</span></td><td>The session class that switched CSRF checks off</td></tr>
+          <tr><td>api/reports.py</td><td><span class="pill info">changed</span></td><td>Access checks on every report endpoint; report ID lists removed</td></tr>
+          <tr><td>api/uploads.py</td><td><span class="pill info">changed</span></td><td>Sign-in and AI limits; owner check on custom prompts; multipart body fix; docstrings</td></tr>
+          <tr><td>api/prompt_modules.py</td><td><span class="pill info">changed</span></td><td>Standard session authentication with CSRF; docstrings</td></tr>
+          <tr><td>views.py</td><td><span class="pill info">changed</span></td><td>Honest AI labelling, daily quota, OpenAI timeout, staff-only test endpoints, no key prefix in logs</td></tr>
+          <tr><td>services/report_store.py</td><td><span class="pill info">changed</span></td><td>No in-memory report copies; visibility rules; an owner is never cleared</td></tr>
+          <tr><td>services/cleanup_service.py</td><td><span class="pill info">changed</span></td><td>Users only clean up their own reports</td></tr>
+          <tr><td>urls.py</td><td><span class="pill info">changed</span></td><td><code>auth/login/</code> uses the throttled sign-in view</td></tr>
+          <tr><td>migrations/0006_create_cache_table.py</td><td><span class="pill ok">new</span></td><td>Creates the shared cache table during <code>migrate</code></td></tr>
+          <tr><td>tests.py</td><td><span class="pill info">changed</span></td><td>36 tests (was empty)</td></tr>
+          <tr class="group"><td colspan="3">backend/financial_analytics and backend</td></tr>
+          <tr><td>settings_base.py</td><td><span class="pill ok">new</span></td><td>All shared settings, including production security</td></tr>
+          <tr><td>settings_postgres.py · settings_sqlite.py</td><td><span class="pill info">changed</span></td><td>Now only define the database</td></tr>
+          <tr><td>env.py</td><td><span class="pill ok">new</span></td><td>Loads <code>.env</code> and picks the settings module</td></tr>
+          <tr><td>__init__.py · wsgi.py · asgi.py · celery.py · manage.py</td><td><span class="pill info">changed</span></td><td>All choose settings through env.py</td></tr>
+          <tr><td>middleware.py</td><td><span class="pill info">changed</span></td><td>Hides 500 details when DEBUG is off</td></tr>
+          <tr><td>gunicorn.conf.py</td><td><span class="pill ok">new</span></td><td>Production server settings</td></tr>
+          <tr><td>requirements.txt</td><td><span class="pill info">changed</span></td><td>Django 5.2 LTS</td></tr>
+          <tr><td>.env.example</td><td><span class="pill info">changed</span></td><td>Every setting, with production notes</td></tr>
+          <tr class="group"><td colspan="3">frontend and repository</td></tr>
+          <tr><td>frontend/src/services/api.js</td><td><span class="pill info">changed</span></td><td>Sends the CSRF token; AI requests wait 300 s</td></tr>
+          <tr><td>.gitignore</td><td><span class="pill info">changed</span></td><td>Ignores databases, logs, dumps and <code>.env</code>; garbled lines removed</td></tr>
+          <tr><td>db.sqlite3 · django.log · reports.json · temp_reports.json</td><td><span class="pill mid">untracked</span></td><td>Removed from git, kept on disk</td></tr>
+          <tr><td>.github/workflows/ci.yml</td><td><span class="pill ok">new</span></td><td>Tests and build on every push and pull request</td></tr>
+          <tr><td>docs/how-it-works.html · docs/hardening-changes.html</td><td><span class="pill ok">new</span></td><td>These two pages</td></tr>
+          <tr><td>DEPLOYMENT.md</td><td><span class="pill info">changed</span></td><td>Rewritten for the current stack</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- OPEN -->
+  <section class="block" id="open">
+    <div class="head">
+      <div class="kicker">Part 9</div>
+      <h2>Still open</h2>
+    </div>
+    <ul class="open">
+      <li><span class="pill mid">prompts</span><span><strong>Shared prompts can be changed by any report owner.</strong> Regenerating a section updates the shared prompt module, and "save master prompt" overwrites the shared dataset prompt, while the direct prompt editors are staff-only. Decide whether that is intended.</span></li>
+      <li><span class="pill mid">scale</span><span><strong>Report generation still runs inside the upload request.</strong> The timeouts now line up, and threaded workers keep one slow upload from blocking others, which is fine for a small team. Heavier use needs a background job queue.</span></li>
+      <li><span class="pill mid">frontend</span><span><strong>The TypeScript check fails</strong> on five existing errors in <code>PromptReportSplitPane.vue</code>, so builds use <code>build-only</code> for now.</span></li>
+      <li><span class="pill mid">frontend</span><span><strong>Three frontend calls still hit old endpoints</strong> (report metrics, trends and benchmark) that read the empty legacy tables and can only return 404. The AI status panel also calls a wrong path (<code>/api/analytics/ai/…</code> instead of <code>/api/ai/…</code>).</span></li>
+    </ul>
+  </section>
+
+  <footer>Written from the changes made on 5 October 2026 in <code>Ai-Financial-Reporting-System/</code>. Test counts, the deploy check and the live proxy check were run that day against a local PostgreSQL database.</footer>
+</div>
+</body>
+</html>

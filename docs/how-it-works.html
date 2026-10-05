@@ -1,0 +1,868 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Inside AI Financial Analytics</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+<style>
+/* Layout: one 1080px column; prose capped near 68ch; diagrams and schema grids use the full width. Palette borrows the navy + cyan of the app's branded PDF export. */
+:root {
+  --bg: #F4F7FA;
+  --surface: #FFFFFF;
+  --sunk: #EAF0F5;
+  --ink: #102231;
+  --ink-soft: #4A5E70;
+  --rule: #D3DDE6;
+  --brand: #0F375A;
+  --signal: #1A7F9F;
+  --signal-soft: #DCEFF5;
+  --warn: #8F5400;
+  --warn-soft: #FBEED6;
+  --bad: #A3242C;
+  --bad-soft: #F8E0E1;
+  --ok: #1C6E45;
+  --ok-soft: #DCF0E4;
+  --f-display: "IBM Plex Sans Condensed", "Arial Narrow", "Segoe UI", sans-serif;
+  --f-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0A1520; --surface: #0F1E2C; --sunk: #142839; --ink: #E2EBF3; --ink-soft: #9DB1C3; --rule: #23394C;
+    --brand: #A3CDEC; --signal: #4FBCD9; --signal-soft: #11313F; --warn: #E6AA4E; --warn-soft: #3A2A11;
+    --bad: #F2878C; --bad-soft: #3B1A1D; --ok: #5DCB94; --ok-soft: #113224; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0A1520; --surface: #0F1E2C; --sunk: #142839; --ink: #E2EBF3; --ink-soft: #9DB1C3; --rule: #23394C;
+  --brand: #A3CDEC; --signal: #4FBCD9; --signal-soft: #11313F; --warn: #E6AA4E; --warn-soft: #3A2A11;
+  --bad: #F2878C; --bad-soft: #3B1A1D; --ok: #5DCB94; --ok-soft: #113224; color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--f-body);
+  font-size: 16px;
+  line-height: 1.6;
+  padding-inline: 16px;
+  padding-block: 0 64px;
+}
+.wrap { max-width: 1080px; margin-inline: auto; }
+.prose { max-width: 68ch; }
+h1, h2, h3, h4 { font-family: var(--f-display); color: var(--brand); text-wrap: balance; line-height: 1.15; margin: 0; }
+h1 { font-size: clamp(2.1rem, 5vw, 3.1rem); font-weight: 700; letter-spacing: -0.01em; }
+h2 { font-size: 1.85rem; font-weight: 600; }
+h3 { font-size: 1.25rem; font-weight: 600; }
+h4 { font-size: 1rem; font-weight: 600; }
+p { margin: 0; }
+code { font-family: var(--f-mono); font-size: 0.86em; background: var(--sunk); padding: 0.08em 0.35em; border-radius: 3px; overflow-wrap: anywhere; }
+a { color: var(--signal); }
+a:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+
+.masthead { padding-block: 48px 28px; display: grid; gap: 14px; border-bottom: 1px solid var(--rule); }
+.eyebrow { font-family: var(--f-mono); font-size: 0.78rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--signal); }
+.lede { font-size: 1.12rem; color: var(--ink-soft); max-width: 66ch; }
+.stack { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.stack span { font-family: var(--f-mono); font-size: 0.78rem; padding: 3px 9px; border: 1px solid var(--rule); border-radius: 3px; background: var(--surface); color: var(--ink-soft); }
+
+nav.toc {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5;
+  background: var(--bg); border-bottom: 1px solid var(--rule);
+  display: flex; flex-wrap: wrap; gap: 4px 18px; padding-block: 10px; font-size: 0.9rem;
+}
+nav.toc a { color: var(--ink-soft); text-decoration: none; font-weight: 500; }
+nav.toc a:hover { color: var(--signal); }
+
+section.block { padding-block: 52px 8px; display: grid; gap: 22px; scroll-margin-top: 56px; }
+.kicker { font-family: var(--f-mono); font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-soft); }
+.head { display: grid; gap: 6px; }
+
+.figure { background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 16px; overflow-x: auto; }
+.figure svg { display: block; width: 100%; min-width: 660px; height: auto; }
+.figure figcaption { font-size: 0.85rem; color: var(--ink-soft); margin-top: 10px; }
+figure { margin: 0; }
+.d-box { fill: var(--surface); stroke: var(--rule); stroke-width: 1.5; }
+.d-box.main { fill: var(--sunk); stroke: var(--brand); }
+.d-box.ext { fill: var(--signal-soft); stroke: var(--signal); }
+.d-inner { fill: var(--surface); stroke: var(--rule); stroke-width: 1; }
+.d-title { fill: var(--brand); font-family: var(--f-display); font-weight: 600; font-size: 16px; }
+.d-text { fill: var(--ink-soft); font-family: var(--f-body); font-size: 12.5px; }
+.d-mono { fill: var(--ink); font-family: var(--f-mono); font-size: 11.5px; }
+.d-line { stroke: var(--signal); stroke-width: 1.75; fill: none; }
+.d-head { fill: var(--signal); }
+.d-label { fill: var(--signal); font-family: var(--f-mono); font-size: 10.5px; }
+
+.split { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 14px; }
+.note { border: 1px solid var(--rule); background: var(--surface); border-radius: 6px; padding: 14px 16px; display: grid; gap: 6px; min-width: 0; align-content: start; }
+.note h4 { font-size: 0.98rem; }
+.note p, .note li { font-size: 0.93rem; color: var(--ink-soft); }
+.note ul { margin: 0; padding-left: 1.1em; display: grid; gap: 3px; }
+.callout { border-left: 3px solid var(--signal); background: var(--signal-soft); padding: 12px 16px; border-radius: 0 6px 6px 0; font-size: 0.95rem; max-width: 80ch; }
+.callout.warn { border-left-color: var(--warn); background: var(--warn-soft); }
+
+.phase { display: grid; gap: 12px; }
+.phase + .phase { margin-top: 10px; }
+.phase-name { font-family: var(--f-mono); font-size: 0.78rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--signal); padding-bottom: 6px; border-bottom: 1px dashed var(--rule); }
+ol.steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+ol.steps > li {
+  display: grid; grid-template-columns: 2.4rem minmax(0, 1fr); gap: 14px;
+  background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 14px 16px;
+}
+.num {
+  font-family: var(--f-mono); font-weight: 500; font-size: 0.95rem; color: var(--brand);
+  width: 2.4rem; height: 2.4rem; display: grid; place-items: center;
+  border: 1.5px solid var(--brand); border-radius: 4px; font-variant-numeric: tabular-nums;
+}
+.step-body { display: grid; gap: 6px; min-width: 0; }
+.step-body p { font-size: 0.95rem; color: var(--ink-soft); max-width: 80ch; }
+.refs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+.ref { font-family: var(--f-mono); font-size: 0.74rem; padding: 2px 8px; border-radius: 3px; background: var(--sunk); color: var(--ink); overflow-wrap: anywhere; }
+.ref.r { background: var(--signal-soft); color: var(--signal); }
+.ref.w { background: var(--warn-soft); color: var(--warn); }
+.ref.r::before { content: "reads "; opacity: 0.75; }
+.ref.w::before { content: "writes "; opacity: 0.75; }
+
+.tablewrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: 6px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+th, td { text-align: left; vertical-align: top; padding: 9px 12px; border-bottom: 1px solid var(--rule); }
+th { font-family: var(--f-mono); font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-soft); font-weight: 500; background: var(--sunk); }
+tr:last-child td { border-bottom: 0; }
+td { color: var(--ink-soft); }
+td:first-child { color: var(--ink); }
+.pill { display: inline-block; font-family: var(--f-mono); font-size: 0.74rem; padding: 1px 8px; border-radius: 999px; white-space: nowrap; }
+.pill.ok { background: var(--ok-soft); color: var(--ok); }
+.pill.no { background: var(--bad-soft); color: var(--bad); }
+.pill.mid { background: var(--warn-soft); color: var(--warn); }
+.pill.info { background: var(--signal-soft); color: var(--signal); }
+
+.types { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 12px; }
+.type { background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 12px 14px; display: grid; gap: 8px; min-width: 0; }
+.type h4 { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.type h4 span { font-family: var(--f-mono); font-size: 0.72rem; color: var(--ink-soft); font-weight: 400; }
+.type ol { margin: 0; padding-left: 1.3em; font-size: 0.86rem; color: var(--ink-soft); display: grid; gap: 2px; }
+
+.schema-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 470px), 1fr)); gap: 14px; align-items: start; }
+.tbl { background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; display: grid; min-width: 0; }
+.tbl > header { padding: 12px 14px 4px; }
+.tbl h4 { font-family: var(--f-mono); font-size: 0.92rem; font-weight: 500; color: var(--brand); overflow-wrap: anywhere; }
+.tbl > p { padding: 0 14px 10px; font-size: 0.88rem; color: var(--ink-soft); }
+.tbl .cols { overflow-x: auto; border-top: 1px solid var(--rule); }
+.tbl table { font-size: 0.82rem; }
+.tbl td, .tbl th { padding: 6px 12px; }
+.tbl td:first-child { font-family: var(--f-mono); font-size: 0.8rem; white-space: nowrap; }
+.tbl td:nth-child(2) { font-family: var(--f-mono); font-size: 0.76rem; white-space: nowrap; color: var(--signal); }
+.k { font-family: var(--f-mono); font-size: 0.66rem; padding: 0 5px; border-radius: 3px; margin-left: 4px; vertical-align: 1px; }
+.k.pk { background: var(--brand); color: var(--surface); }
+.k.fk { background: var(--signal-soft); color: var(--signal); border: 1px solid var(--signal); }
+.k.uq { border: 1px solid var(--ink-soft); color: var(--ink-soft); }
+
+pre.code {
+  margin: 0; background: var(--sunk); border: 1px solid var(--rule); border-radius: 6px;
+  padding: 14px 16px; overflow-x: auto; font-family: var(--f-mono); font-size: 0.8rem; line-height: 1.55; color: var(--ink);
+}
+pre.code .c { color: var(--ink-soft); font-style: italic; }
+.mermaid-wrap { background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 12px; overflow-x: auto; }
+pre.mermaid { margin: 0; background: transparent; font-family: var(--f-mono); font-size: 0.78rem; color: var(--ink-soft); }
+
+.legacy { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 10px; }
+.legacy .note h4 { font-family: var(--f-mono); font-weight: 500; font-size: 0.86rem; }
+.legacy .note p { font-family: var(--f-mono); font-size: 0.76rem; color: var(--ink-soft); }
+
+ul.limits { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; max-width: 86ch; }
+ul.limits li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; align-items: start; background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 12px 14px; font-size: 0.94rem; color: var(--ink-soft); }
+ul.limits strong { color: var(--ink); font-weight: 600; }
+
+footer { margin-top: 56px; padding-top: 16px; border-top: 1px solid var(--rule); font-size: 0.84rem; color: var(--ink-soft); }
+
+@media (max-width: 520px) {
+  ol.steps > li { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  h2 { font-size: 1.55rem; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div class="eyebrow">Project internals · describes the code as of 5 Oct 2026</div>
+    <h1>Inside AI Financial Analytics</h1>
+    <p class="lede">How a JSON file uploaded in the browser becomes an AI-written financial report, which code runs at each step, who may do what, and the database tables that hold the result. For what changed to make the app deployable, see <a href="hardening-changes.html">Hardening AI Financial Analytics</a>.</p>
+    <div class="stack">
+      <span>Vue 3 · Vite · Pinia</span><span>Django 5.2 · DRF</span><span>PostgreSQL</span><span>OpenAI · gpt-4o-mini</span><span>ReportLab · python-docx · openpyxl</span>
+    </div>
+  </header>
+
+  <nav class="toc" aria-label="Sections">
+    <a href="#architecture">Architecture</a>
+    <a href="#pipeline">Upload to report</a>
+    <a href="#ai">AI outcomes</a>
+    <a href="#after">After the report</a>
+    <a href="#schema">Database schema</a>
+    <a href="#limitations">Known limitations</a>
+  </nav>
+
+  <!-- ARCHITECTURE -->
+  <section class="block" id="architecture">
+    <div class="head">
+      <div class="kicker">Part 1</div>
+      <h2>Architecture</h2>
+    </div>
+    <p class="prose">In development two processes run. The Vite dev server serves the Vue app and forwards every <code>/api/*</code> request to Django. Django does all the work in a single request: it checks the user, validates the upload, calls OpenAI, and stores the report in PostgreSQL. No background worker or Redis is needed. In production nginx and Gunicorn take the place of Vite and the Django dev server (see <code>DEPLOYMENT.md</code>).</p>
+
+    <figure class="figure">
+      <svg viewBox="0 0 900 290" role="img" aria-labelledby="arch-t arch-d">
+        <title id="arch-t">System architecture</title>
+        <desc id="arch-d">Browser running the Vue app talks to the Vite dev server, which proxies API calls to Django. Django reads and writes PostgreSQL, keeps rate-limit counters and locks in a shared cache, and calls the OpenAI API.</desc>
+        <defs>
+          <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path class="d-head" d="M0,0 L10,5 L0,10 z"/>
+          </marker>
+        </defs>
+
+        <rect class="d-box" x="10" y="105" width="170" height="84" rx="6"/>
+        <text class="d-title" x="95" y="135" text-anchor="middle">Browser</text>
+        <text class="d-text" x="95" y="155" text-anchor="middle">Vue 3 + Pinia app</text>
+        <text class="d-mono" x="95" y="174" text-anchor="middle">localhost:5173</text>
+
+        <rect class="d-box" x="230" y="105" width="170" height="84" rx="6"/>
+        <text class="d-title" x="315" y="135" text-anchor="middle">Vite dev server</text>
+        <text class="d-text" x="315" y="155" text-anchor="middle">serves the app and</text>
+        <text class="d-mono" x="315" y="174" text-anchor="middle">proxies /api/*</text>
+
+        <rect class="d-box main" x="450" y="30" width="210" height="234" rx="6"/>
+        <text class="d-title" x="555" y="58" text-anchor="middle">Django 5.2 + DRF</text>
+        <text class="d-mono" x="555" y="77" text-anchor="middle">localhost:8000</text>
+        <rect class="d-inner" x="463" y="92" width="184" height="30" rx="3"/>
+        <text class="d-mono" x="555" y="111" text-anchor="middle">api/access.py · checks</text>
+        <rect class="d-inner" x="463" y="128" width="184" height="30" rx="3"/>
+        <text class="d-mono" x="555" y="147" text-anchor="middle">api/uploads.py · upload</text>
+        <rect class="d-inner" x="463" y="164" width="184" height="30" rx="3"/>
+        <text class="d-mono" x="555" y="183" text-anchor="middle">api/reports.py · reports</text>
+        <rect class="d-inner" x="463" y="200" width="184" height="50" rx="3"/>
+        <text class="d-mono" x="555" y="220" text-anchor="middle">views.py + services/</text>
+        <text class="d-text" x="555" y="238" text-anchor="middle">prompts, AI, exports</text>
+
+        <rect class="d-box" x="715" y="20" width="175" height="72" rx="6"/>
+        <text class="d-title" x="802" y="48" text-anchor="middle">PostgreSQL</text>
+        <text class="d-mono" x="802" y="70" text-anchor="middle">financial_analytics</text>
+
+        <rect class="d-box" x="715" y="111" width="175" height="72" rx="6"/>
+        <text class="d-title" x="802" y="139" text-anchor="middle">Shared cache</text>
+        <text class="d-text" x="802" y="161" text-anchor="middle">limits, quota, locks</text>
+
+        <rect class="d-box ext" x="715" y="202" width="175" height="72" rx="6"/>
+        <text class="d-title" x="802" y="230" text-anchor="middle">OpenAI API</text>
+        <text class="d-text" x="802" y="252" text-anchor="middle">gpt-4o-mini by default</text>
+
+        <line class="d-line" x1="180" y1="147" x2="228" y2="147" marker-end="url(#ah)"/>
+        <line class="d-line" x1="400" y1="147" x2="448" y2="147" marker-end="url(#ah)"/>
+        <path class="d-line" d="M660 90 L690 90 L690 56 L713 56" marker-end="url(#ah)"/>
+        <line class="d-line" x1="660" y1="147" x2="713" y2="147" marker-end="url(#ah)"/>
+        <path class="d-line" d="M660 210 L690 210 L690 238 L713 238" marker-end="url(#ah)"/>
+        <text class="d-label" x="204" y="139" text-anchor="middle">HTTP</text>
+        <text class="d-label" x="424" y="139" text-anchor="middle">:8000</text>
+      </svg>
+      <figcaption>The session cookie and CSRF token from sign-in ride along on every proxied request. The shared cache is a table in the same database (or Redis when <code>REDIS_URL</code> is set), so every server process sees the same counters and locks. Reports themselves are always read straight from the database.</figcaption>
+    </figure>
+
+    <div class="split">
+      <div class="note">
+        <h4>Frontend, <code>frontend/src</code></h4>
+        <ul>
+          <li><code>views/</code> holds the pages: Login, Dashboard, Upload, Reports, Report detail, Analytics, Settings, Prompt Studio</li>
+          <li><code>services/api.js</code> makes every backend call through one Axios client and adds the CSRF header to changing requests</li>
+          <li><code>router/index.ts</code> sends every page except <code>/login</code> to the login screen until a session exists</li>
+        </ul>
+      </div>
+      <div class="note">
+        <h4>Backend, <code>backend/analytics</code></h4>
+        <ul>
+          <li><code>urls.py</code> maps every route under <code>/api/</code></li>
+          <li><code>api/</code> holds the request handlers; <code>api/access.py</code> holds the shared sign-in, ownership and rate-limit checks</li>
+          <li>Much shared logic still lives in the large <code>views.py</code>; <code>services/</code> holds the prompt registry, prompt modules, report store, cleanup and branded PDF</li>
+        </ul>
+      </div>
+      <div class="note">
+        <h4>Settings</h4>
+        <ul>
+          <li><code>financial_analytics/env.py</code> loads <code>backend/.env</code> and picks <code>settings_postgres</code> when <code>DB_NAME</code> is set, otherwise <code>settings_sqlite</code></li>
+          <li>Both import <code>settings_base.py</code>, which holds everything except the database</li>
+          <li><code>backend/.env.example</code> lists every setting, including the OpenAI key, rate limits and production switches</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- PIPELINE -->
+  <section class="block" id="pipeline">
+    <div class="head">
+      <div class="kicker">Part 2</div>
+      <h2>From upload to report</h2>
+    </div>
+    <p class="prose">This is the path taken by <code>POST /api/simple-upload/</code>, the upload route the frontend uses. Each step lists the code that runs and the tables it touches. All tables are prefixed <code>analytics_</code> except Django's own.</p>
+
+    <div class="phase">
+      <div class="phase-name">Sign in</div>
+      <ol class="steps">
+        <li>
+          <span class="num">1</span>
+          <div class="step-body">
+            <h3>Sign in and get a session</h3>
+            <p>The login page posts the username or email address and the password to <code>POST /api/simple-login/</code>. The backend tries the input as a username, then as an email. After five failures for one account from one address, sign-in is locked for 15 minutes. On success <code>login()</code> sets the session cookie and a fresh CSRF cookie. On each page change the router asks <code>GET /api/auth/me/</code> whether the session is still valid.</p>
+            <div class="refs"><span class="ref">api/auth.py · simple_login_view</span><span class="ref r">auth_user</span><span class="ref w">django_session</span><span class="ref w">django_cache</span></div>
+          </div>
+        </li>
+      </ol>
+    </div>
+
+    <div class="phase">
+      <div class="phase-name">Upload and check</div>
+      <ol class="steps">
+        <li>
+          <span class="num">2</span>
+          <div class="step-body">
+            <h3>Pick a dataset type and send the file</h3>
+            <p>On the Upload page the user chooses one of three dataset types (WACC, Money Market or Financial Instruments) and can also set the template, sections, length and detail level. The file goes up as multipart form data with the CSRF token in the <code>X-CSRFToken</code> header. The request must come from a signed-in user and counts towards that user's hourly AI limit (30 by default).</p>
+            <div class="refs"><span class="ref">views/UploadView.vue</span><span class="ref">services/api.js · /simple-upload/</span><span class="ref">api/access.py</span></div>
+          </div>
+        </li>
+        <li>
+          <span class="num">3</span>
+          <div class="step-body">
+            <h3>Validate the file and its type</h3>
+            <p>Returns a 400 error for any of these: no file, no dataset type, a name not ending in <code>.json</code>, bytes that aren't UTF-8, or JSON that won't parse. Then comes the type check. Every key and text value in the file is scanned against six keyword groups for each type. The file passes only if it matches at least two groups and scores highest for the type the user picked.</p>
+            <div class="refs"><span class="ref">api/uploads.py · _validate_dataset_type</span></div>
+          </div>
+        </li>
+        <li>
+          <span class="num">4</span>
+          <div class="step-body">
+            <h3>Normalize the data and find a name and period</h3>
+            <p>The original JSON is kept untouched. An analysis copy is built beside it: a top-level array becomes <code>{records, record_count}</code>, and an older <code>Dashboard</code>-style file is flattened. The code then searches up to six levels deep for a name key (<code>bank_name</code>, <code>company</code>, <code>entity</code>…) and a period key (<code>period</code>, <code>asOf</code>, <code>date</code>…). If none is found, it uses "Financial Dataset" and "Unknown Period".</p>
+            <div class="refs"><span class="ref">views.py · normalize_json_for_analysis</span><span class="ref">views.py · extract_entity_metadata</span></div>
+          </div>
+        </li>
+      </ol>
+    </div>
+
+    <div class="types" aria-label="Dataset type keyword groups">
+      <div class="type">
+        <h4>WACC <span>template wacc_report</span></h4>
+        <ol>
+          <li>wacc, weighted average cost of capital</li>
+          <li>cost of equity</li>
+          <li>cost of debt</li>
+          <li>tax rate</li>
+          <li>capital structure, equity or debt ratio</li>
+          <li>beta, risk-free rate, market risk premium</li>
+        </ol>
+      </div>
+      <div class="type">
+        <h4>Money Market <span>template money_market_report</span></h4>
+        <ol>
+          <li>treasury bills, t-bill</li>
+          <li>commercial paper</li>
+          <li>certificates of deposit</li>
+          <li>interbank rate</li>
+          <li>repo rate, repurchase agreement</li>
+          <li>liquidity, short-term</li>
+        </ol>
+      </div>
+      <div class="type">
+        <h4>Financial Instruments <span>template financial_instruments_report</span></h4>
+        <ol>
+          <li>bonds, treasury securities</li>
+          <li>equities, stocks, shares</li>
+          <li>derivatives, options, swaps, futures</li>
+          <li>mutual funds</li>
+          <li>ETFs</li>
+          <li>commodities, foreign exchange, fx</li>
+        </ol>
+      </div>
+    </div>
+
+    <div class="phase">
+      <div class="phase-name">Build the prompt</div>
+      <ol class="steps">
+        <li>
+          <span class="num">5</span>
+          <div class="step-body">
+            <h3>Decide which sections the report will have</h3>
+            <p>The dataset type picks a default template unless the upload named one. The report prompt registry turns that template into an ordered list of section keys. A WACC report, for example, gets executive_summary, wacc_analysis, financial_ratios, risk_assessment, benchmark_comparison and recommendations.</p>
+            <div class="refs"><span class="ref">services/report_prompt_registry.py</span><span class="ref r">reportconfiguration</span></div>
+          </div>
+        </li>
+        <li>
+          <span class="num">6</span>
+          <div class="step-body">
+            <h3>Split the analysis prompt into one prompt per section</h3>
+            <p>The prompt for the chosen dataset type is loaded from the database and cut into <code>[SECTION:key] … [/SECTION]</code> blocks. A section with no block borrows the text of its prompt module. The blocks are then joined back into the master prompt stored with the report.</p>
+            <div class="refs"><span class="ref">services/prompt_module_store.py</span><span class="ref r">analysisprompt</span><span class="ref r">promptmodule</span></div>
+          </div>
+        </li>
+        <li>
+          <span class="num">7</span>
+          <div class="step-body">
+            <h3>Save a placeholder and update the prompt modules</h3>
+            <p>A report row owned by the uploader is created right away with status <code>processing</code> and progress 35, under a new UUID that also serves as the task id. Next, every section prompt that differs from its prompt module's current text is saved onto that module as a new version, so each section of the report can later show which prompt wrote it.</p>
+            <div class="refs"><span class="ref">services/report_store.py · save_report</span><span class="ref w">persistedreport</span><span class="ref w">promptmodule</span><span class="ref w">promptmoduleversion</span></div>
+          </div>
+        </li>
+      </ol>
+    </div>
+
+    <div class="phase">
+      <div class="phase-name">Generate</div>
+      <ol class="steps">
+        <li>
+          <span class="num">8</span>
+          <div class="step-body">
+            <h3>Scan the numbers (no AI)</h3>
+            <p>The code walks the JSON, records every numeric field with its path, and tags it as revenue, profitability, risk and so on. The result is stored as <code>ai_analysis</code> and gives the report a structured summary even when the AI step fails.</p>
+            <div class="refs"><span class="ref">views.py · perform_initial_ai_analysis</span></div>
+          </div>
+        </li>
+        <li>
+          <span class="num">9</span>
+          <div class="step-body">
+            <h3>Ask OpenAI for every section in one call</h3>
+            <p>The call is first counted against the daily quota (<code>OPENAI_DAILY_QUOTA_LIMIT</code>, 1,000 by default). Then one chat completion runs in JSON mode. The system prompt combines the analyst instructions, a summary of the data, the full JSON (cut off at 14,000 characters) and the per-section instructions. The model comes from <code>OPENAI_MODEL</code> (default gpt-4o-mini), with up to 4,096 output tokens, a 60-second timeout and up to two retries. The reply must be <code>{"sections": [...]}</code>, with one item for each section key.</p>
+            <div class="refs"><span class="ref">views.py · generate_comprehensive_ai_analysis</span><span class="ref">services/dynamic_report_builder.py (fallback)</span><span class="ref w">django_cache</span></div>
+          </div>
+        </li>
+      </ol>
+    </div>
+
+    <div class="phase">
+      <div class="phase-name">Store and trace</div>
+      <ol class="steps">
+        <li>
+          <span class="num">10</span>
+          <div class="step-body">
+            <h3>Overwrite the placeholder with the finished report</h3>
+            <p>The same row is saved again with status <code>completed</code>, the sections in <code>comprehensive_analysis</code>, and <code>ai_error</code> when AI was unavailable.</p>
+            <div class="refs"><span class="ref w">persistedreport</span></div>
+          </div>
+        </li>
+        <li>
+          <span class="num">11</span>
+          <div class="step-body">
+            <h3>Record where each section came from</h3>
+            <p>Each section gets a <code>trace</code> block naming its prompt module, version, model and confidence: the model name and 0.85 for AI output, or "fallback" and 0.50 for rule-based text. One mapping row per section is created or updated, with hashes of the content.</p>
+            <div class="refs"><span class="ref">prompt_module_store.py · annotate_report_sections</span><span class="ref w">reportsectionmapping</span></div>
+          </div>
+        </li>
+        <li>
+          <span class="num">12</span>
+          <div class="step-body">
+            <h3>Return the report</h3>
+            <p>The whole report goes back in the upload response. <code>GET /api/tasks/{id}/</code> also exists for polling, but it only reads the status field from the report row.</p>
+            <div class="refs"><span class="ref">api/uploads.py · simple_task_status_view</span></div>
+          </div>
+        </li>
+      </ol>
+    </div>
+
+    <p class="callout">Steps 2 to 12 all happen inside one HTTP request. OpenAI's worst case is about three minutes (three 60-second attempts), and the browser, Gunicorn and nginx each wait up to 300 seconds, so a slow reply ends in a labelled fallback report rather than a dropped connection.</p>
+  </section>
+
+  <!-- AI OUTCOMES -->
+  <section class="block" id="ai">
+    <div class="head">
+      <div class="kicker">Part 2b</div>
+      <h2>What the AI step can return</h2>
+    </div>
+    <p class="prose">Step 9 always produces a report, and the report always says whether AI wrote it.</p>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Situation</th><th>Sections saved</th><th>Flagged as AI</th><th>What the user sees</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>Key set, OpenAI returns usable JSON</td>
+            <td>AI-written sections, traced to the model</td>
+            <td><span class="pill ok">ai_enhanced: true</span></td>
+            <td>"Report generated from your analysis prompt"</td>
+          </tr>
+          <tr>
+            <td>No <code>OPENAI_API_KEY</code></td>
+            <td>Rule-based sections built from the data, traced as "fallback"</td>
+            <td><span class="pill no">ai_enhanced: false</span></td>
+            <td>A warning that the key isn't configured, also stored as <code>ai_error</code></td>
+          </tr>
+          <tr>
+            <td>The call errors, times out, hits the OpenAI quota or returns no sections</td>
+            <td>Rule-based sections, traced as "fallback"</td>
+            <td><span class="pill no">ai_enhanced: false</span></td>
+            <td>A warning with the reason; <code>warning_code</code> is <code>openai_quota_exceeded</code> for quota problems, otherwise <code>ai_unavailable</code></td>
+          </tr>
+          <tr>
+            <td>The app's daily limit is reached</td>
+            <td>Rule-based sections, traced as "fallback"</td>
+            <td><span class="pill no">ai_enhanced: false</span></td>
+            <td>"The daily limit of 1000 AI requests has been reached. It resets at midnight UTC."</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="callout">Regenerating a section or a whole report works differently. A rule-based result never replaces existing text. When AI is unavailable those requests return an error with the reason, and the report stays as it was.</p>
+  </section>
+
+  <!-- AFTER -->
+  <section class="block" id="after">
+    <div class="head">
+      <div class="kicker">Part 3</div>
+      <h2>After the report exists</h2>
+    </div>
+    <p class="prose">Every report belongs to the user who uploaded it. Users only see and open their own reports; staff can open any report, including old ones with no owner. Anyone else asking for a report gets "Report not found".</p>
+    <div class="split">
+      <div class="note">
+        <h4>Read and list</h4>
+        <p><code>GET /api/simple-reports/</code> lists the user's reports (staff also see unowned ones). <code>GET /api/simple-reports/{id}/</code> returns one report, read straight from the database.</p>
+      </div>
+      <div class="note">
+        <h4>Rewrite one section (Prompt Studio)</h4>
+        <p><code>POST /api/simple-reports/{id}/sections/{key}/regenerate/</code> takes an edited prompt of 3 to 12,000 characters and counts towards the hourly AI limit. A lock in the shared cache returns 409 if that section is already regenerating. It saves the prompt as a new version of the section's prompt module, asks the AI for that one section, adds the change to <code>section_versions</code> inside the report, and updates the mapping row.</p>
+      </div>
+      <div class="note">
+        <h4>Export</h4>
+        <p><code>GET /api/simple-reports/{id}/export/?format=</code> accepts <code>json</code>, <code>pdf</code>, <code>csv</code>, <code>word</code> or <code>excel</code>. The PDF is built with ReportLab and has a branded cover and contents page. Word uses python-docx and Excel uses openpyxl.</p>
+      </div>
+      <div class="note">
+        <h4>Archive, restore, delete (staff)</h4>
+        <p><code>POST /api/reports/manage/bulk-action/</code> acts on several reports at once. Archiving sets <code>is_archived</code>; deleting removes the row and its section mappings. Every action writes an audit log row.</p>
+      </div>
+      <div class="note">
+        <h4>Retention cleanup</h4>
+        <p>Deletes reports older than the user's retention setting (default 90 days; the unit can be days, weeks or months). Users clean up their own reports; staff also clear unowned ones. Run it from the app with a dry-run preview (<code>/api/cleanup/</code>) or with <code>python manage.py cleanup_old_data</code>, which <code>DEPLOYMENT.md</code> schedules nightly with cron.</p>
+      </div>
+      <div class="note">
+        <h4>Edit the master prompts (staff)</h4>
+        <p>The five dataset analysis prompts can be edited, saved and reset to their defaults through <code>/api/analysis-prompts/</code>. A report's owner can also save its edited sections back as the dataset prompt (<code>…/save-master-prompt/</code>), which changes it for everyone.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- SCHEMA -->
+  <section class="block" id="schema">
+    <div class="head">
+      <div class="kicker">Part 4</div>
+      <h2>Database schema</h2>
+    </div>
+    <p class="prose">A PostgreSQL database, <code>financial_analytics</code>, managed through Django's ORM and six migrations. Without <code>DB_NAME</code> in <code>.env</code>, local development uses the SQLite file <code>backend/db.sqlite3</code> with the same schema. The models come from two generations of the design. The current app writes only the live tables. The legacy tables still exist and still have endpoints, but the upload flow never fills them.</p>
+
+    <h3>Live tables and how they connect</h3>
+    <div class="mermaid-wrap">
+<pre class="mermaid">
+erDiagram
+  auth_user |o--o{ persistedreport : "owns"
+  persistedreport ||--o{ reportsectionmapping : "has sections"
+  promptmodule ||--o{ promptmoduleversion : "versions"
+  promptmodule |o--o{ reportsectionmapping : "wrote"
+  promptmoduleversion |o--o{ reportsectionmapping : "exact version"
+  auth_user ||--o| usersettings : "settings"
+  auth_user |o--o{ dataretentionauditlog : "acted"
+  auth_user |o--o{ promptmodule : "created or updated"
+  auth_user |o--o{ analysisprompt : "updated"
+  auth_user {
+    int id PK
+    varchar username UK
+  }
+  persistedreport {
+    uuid id PK
+    int owner_id FK
+    json report_data
+    bool is_archived
+  }
+  reportsectionmapping {
+    int report_id FK
+    varchar section_key
+    int prompt_module_id FK
+    int prompt_module_version_id FK
+  }
+  promptmodule {
+    int id PK
+    varchar slug UK
+    text prompt_text
+    int version_current
+  }
+  promptmoduleversion {
+    int prompt_module_id FK
+    int version_number
+    text prompt_text
+  }
+  analysisprompt {
+    varchar prompt_id UK
+    text content
+    text default_content
+  }
+  usersettings {
+    int user_id FK
+    json settings
+  }
+  dataretentionauditlog {
+    int user_id FK
+    varchar action
+    json report_ids
+  }
+  reportconfiguration {
+    smallint id PK "always 1"
+    json templates
+    json section_library
+  }
+</pre>
+    </div>
+
+    <div class="schema-grid">
+      <article class="tbl">
+        <header><h4>analytics_persistedreport</h4></header>
+        <p>The center of the app. One row per report, with the whole report stored as one JSON document.</p>
+        <div class="cols"><table>
+          <thead><tr><th>Column</th><th>Type</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td>id<span class="k pk">PK</span></td><td>uuid</td><td>Also used as the task id</td></tr>
+            <tr><td>owner_id<span class="k fk">FK</span></td><td>int</td><td>auth_user, set to null if the user is deleted. Reports without an owner are visible to staff only</td></tr>
+            <tr><td>owner_username</td><td>varchar(150)</td><td>Name copied at save time</td></tr>
+            <tr><td>report_data</td><td>json</td><td>The full report; shape below</td></tr>
+            <tr><td>is_archived</td><td>bool</td><td>Hidden from default lists</td></tr>
+            <tr><td>archived_at</td><td>datetime</td><td>Null unless archived</td></tr>
+            <tr><td>created_at / updated_at</td><td>datetime</td><td>Set automatically</td></tr>
+          </tbody>
+        </table></div>
+      </article>
+
+      <article class="tbl">
+        <header><h4>analytics_reportsectionmapping</h4></header>
+        <p>Records which prompt version produced each section of a report. Unique on (report_id, section_key).</p>
+        <div class="cols"><table>
+          <thead><tr><th>Column</th><th>Type</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td>id<span class="k pk">PK</span></td><td>int</td><td></td></tr>
+            <tr><td>report_id<span class="k fk">FK</span></td><td>uuid</td><td>persistedreport, deleted with it</td></tr>
+            <tr><td>section_key</td><td>varchar(100)</td><td>e.g. wacc_analysis</td></tr>
+            <tr><td>section_title</td><td>varchar(255)</td><td></td></tr>
+            <tr><td>prompt_module_id<span class="k fk">FK</span></td><td>int</td><td>promptmodule, null if removed</td></tr>
+            <tr><td>prompt_module_version_id<span class="k fk">FK</span></td><td>int</td><td>promptmoduleversion, null if removed</td></tr>
+            <tr><td>ai_model</td><td>varchar(100)</td><td>Model name, or "fallback"</td></tr>
+            <tr><td>confidence_score</td><td>decimal(5,2)</td><td>0.85 for AI, 0.50 for fallback</td></tr>
+            <tr><td>generation_run_id</td><td>varchar(64)</td><td>Random id per run</td></tr>
+            <tr><td>section_content</td><td>json</td><td>Copy of the section output</td></tr>
+            <tr><td>section_hash / content_hash</td><td>varchar(128)</td><td>Detect changed sections</td></tr>
+            <tr><td>regeneration_reason</td><td>varchar(255)</td><td>"initial generation" or the user's reason</td></tr>
+            <tr><td>generation_timestamp</td><td>datetime</td><td></td></tr>
+          </tbody>
+        </table></div>
+      </article>
+
+      <article class="tbl">
+        <header><h4>analytics_promptmodule</h4></header>
+        <p>A reusable prompt for one or more report sections, edited in Prompt Studio. Shared by all users.</p>
+        <div class="cols"><table>
+          <thead><tr><th>Column</th><th>Type</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td>id<span class="k pk">PK</span></td><td>int</td><td></td></tr>
+            <tr><td>name</td><td>varchar(255)</td><td></td></tr>
+            <tr><td>slug<span class="k uq">UQ</span></td><td>varchar(255)</td><td></td></tr>
+            <tr><td>description / category</td><td>text / varchar</td><td>Category defaults to "Custom"</td></tr>
+            <tr><td>prompt_text</td><td>text</td><td>Current prompt</td></tr>
+            <tr><td>related_sections</td><td>json</td><td>Section keys this module serves</td></tr>
+            <tr><td>version_current</td><td>int</td><td>Latest version number</td></tr>
+            <tr><td>status</td><td>varchar(20)</td><td>active, draft or archived</td></tr>
+            <tr><td>order_index / is_favorite</td><td>int / bool</td><td>Display order and pinning</td></tr>
+            <tr><td>tags / ai_settings</td><td>json</td><td></td></tr>
+            <tr><td>created_by_id / updated_by_id<span class="k fk">FK</span></td><td>int</td><td>auth_user, null if removed</td></tr>
+            <tr><td>created_at / updated_at</td><td>datetime</td><td></td></tr>
+          </tbody>
+        </table></div>
+      </article>
+
+      <article class="tbl">
+        <header><h4>analytics_promptmoduleversion</h4></header>
+        <p>A snapshot written on every prompt edit, never changed afterwards. Unique on (prompt_module_id, version_number).</p>
+        <div class="cols"><table>
+          <thead><tr><th>Column</th><th>Type</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td>id<span class="k pk">PK</span></td><td>int</td><td></td></tr>
+            <tr><td>prompt_module_id<span class="k fk">FK</span></td><td>int</td><td>promptmodule, deleted with it</td></tr>
+            <tr><td>version_number</td><td>int</td><td>1, 2, 3…</td></tr>
+            <tr><td>prompt_text</td><td>text</td><td>Prompt at that version</td></tr>
+            <tr><td>change_comment</td><td>text</td><td>e.g. "Seeded from dataset analysis prompt for wacc"</td></tr>
+            <tr><td>ai_settings_snapshot / tags_snapshot</td><td>json</td><td></td></tr>
+            <tr><td>status_snapshot</td><td>varchar(20)</td><td></td></tr>
+            <tr><td>created_by_id<span class="k fk">FK</span></td><td>int</td><td>auth_user</td></tr>
+            <tr><td>created_at</td><td>datetime</td><td></td></tr>
+          </tbody>
+        </table></div>
+      </article>
+
+      <article class="tbl">
+        <header><h4>analytics_analysisprompt</h4></header>
+        <p>The master prompt for each dataset type. The five ids are financial_dashboard, capital_adequacy_cripe, wacc_analysis, money_market_analysis and financial_instruments_analysis.</p>
+        <div class="cols"><table>
+          <thead><tr><th>Column</th><th>Type</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td>id<span class="k pk">PK</span></td><td>int</td><td></td></tr>
+            <tr><td>prompt_id<span class="k uq">UQ</span></td><td>varchar(64)</td><td>One of the five ids</td></tr>
+            <tr><td>title</td><td>varchar(255)</td><td></td></tr>
+            <tr><td>content</td><td>text</td><td>Current prompt, with [SECTION:key] blocks</td></tr>
+            <tr><td>default_content</td><td>text</td><td>Used by "reset"</td></tr>
+            <tr><td>recommended_sections</td><td>json</td><td></td></tr>
+            <tr><td>updated_by_id<span class="k fk">FK</span></td><td>int</td><td>auth_user</td></tr>
+            <tr><td>updated_at</td><td>datetime</td><td></td></tr>
+          </tbody>
+        </table></div>
+      </article>
+
+      <article class="tbl">
+        <header><h4>analytics_reportconfiguration</h4></header>
+        <p>A single settings row (id is always 1) holding the section library and report templates.</p>
+        <div class="cols"><table>
+          <thead><tr><th>Column</th><th>Type</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td>id<span class="k pk">PK</span></td><td>smallint</td><td>Always 1</td></tr>
+            <tr><td>section_library</td><td>json</td><td>Section titles and descriptions</td></tr>
+            <tr><td>templates</td><td>json</td><td>wacc_report, one_page_summary, …</td></tr>
+            <tr><td>default_length</td><td>varchar(20)</td><td>"standard"</td></tr>
+            <tr><td>default_detail_level</td><td>varchar(20)</td><td>"balanced"</td></tr>
+            <tr><td>updated_at</td><td>datetime</td><td></td></tr>
+          </tbody>
+        </table></div>
+      </article>
+
+      <article class="tbl">
+        <header><h4>analytics_usersettings</h4></header>
+        <p>Per-user preferences saved from the Settings page, one row per user.</p>
+        <div class="cols"><table>
+          <thead><tr><th>Column</th><th>Type</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td>id<span class="k pk">PK</span></td><td>int</td><td></td></tr>
+            <tr><td>user_id<span class="k fk">FK</span></td><td>int</td><td>auth_user, one to one, deleted with the user</td></tr>
+            <tr><td>settings</td><td>json</td><td>e.g. retentionDays (default 90), retentionUnit</td></tr>
+            <tr><td>updated_at</td><td>datetime</td><td></td></tr>
+          </tbody>
+        </table></div>
+      </article>
+
+      <article class="tbl">
+        <header><h4>analytics_dataretentionauditlog</h4></header>
+        <p>One row for every cleanup, delete, archive, restore or settings change.</p>
+        <div class="cols"><table>
+          <thead><tr><th>Column</th><th>Type</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td>id<span class="k pk">PK</span></td><td>int</td><td></td></tr>
+            <tr><td>user_id<span class="k fk">FK</span></td><td>int</td><td>auth_user; null means the system did it</td></tr>
+            <tr><td>action</td><td>varchar(32)</td><td>cleanup, delete, archive, restore, settings_update</td></tr>
+            <tr><td>report_ids</td><td>json</td><td>The reports affected</td></tr>
+            <tr><td>metadata</td><td>json</td><td>Extra details, e.g. retention used</td></tr>
+            <tr><td>created_at</td><td>datetime</td><td></td></tr>
+          </tbody>
+        </table></div>
+      </article>
+    </div>
+
+    <h3>What's inside <code>report_data</code></h3>
+    <p class="prose">Most report details live in this JSON column rather than in separate columns, so a schema diagram alone doesn't show them. The outline below is shortened; the notes after <code>//</code> are explanations, not part of the data.</p>
+<pre class="code">{
+  "id": "3f6c2a1e-…",                 <span class="c">// same as the row's primary key</span>
+  "filename": "wacc_q2.json",
+  "status": "completed",              <span class="c">// "processing" while step 9 runs</span>
+  "dataset_type": "wacc",
+  "bank_name": "…",  "data_period": "2026-06-30",
+  "report_options": {
+    "template": "wacc_report",
+    "sections": ["executive_summary", "wacc_analysis", "…"],
+    "length": "standard",  "detail_level": "balanced"
+  },
+  "user_prompt": "[SECTION:executive_summary] … [/SECTION] …",
+  "ai_analysis": { "data_type": "…", "key_metrics": { "…path…": { "value": 0.12, "type": "risk" } } },
+  "comprehensive_analysis": [
+    {
+      "section_key": "executive_summary",
+      "title": "Executive Summary",
+      "content": { "content": "…", "key_points": [], "recommendations": [], "charts": [], "tables": [] },
+      "trace": { "prompt_module_slug": "…", "prompt_module_version": 3, "ai_model": "gpt-4o-mini", "confidence_score": 0.85 }
+    }
+  ],
+  "ai_enhanced": true,
+  "ai_error": "…",                    <span class="c">// only present when AI was unavailable</span>
+  "metadata": { "title": "WACC", "generated_at": "…", "original_json": { }, "normalized_json": { } },
+  "section_versions": { "executive_summary": [ ] }   <span class="c">// added when a section is regenerated</span>
+}</pre>
+
+    <h3>Legacy tables</h3>
+    <p class="prose">These six tables come from the first design: an upload is parsed into a dataset, which gets metrics, insights and a report, processed in the background by Celery. They are still served by <code>/api/upload/</code> and the <code>/api/reports/{id}/metrics/</code>-style endpoints, but the frontend never uploads through that route, and Celery isn't part of the current setup. Retention cleanup still deletes old upload rows here, and their child rows go with them.</p>
+    <div class="mermaid-wrap">
+<pre class="mermaid">
+erDiagram
+  auth_user ||--o{ financialdataupload : "uploads"
+  financialdataupload ||--o| financialdataset : "parsed into"
+  financialdataupload ||--o| analysistask : "tracked by"
+  financialdataset ||--o| financialmetrics : "metrics"
+  financialdataset ||--o{ financialinsight : "insights"
+  financialdataset ||--o| financialreport : "report"
+</pre>
+    </div>
+    <div class="legacy">
+      <div class="note">
+        <h4>analytics_financialdataupload</h4>
+        <p>id PK · user_id FK · file (.json only) · original_filename · status (uploaded, processing, completed, failed) · uploaded_at · processed_at · error_message</p>
+      </div>
+      <div class="note">
+        <h4>analytics_financialdataset</h4>
+        <p>id PK · upload_id FK 1:1 · dashboard_data · qc_dashboard_data · income_risk_data · dupont_data (json) · data_period · bank_name · created_at</p>
+      </div>
+      <div class="note">
+        <h4>analytics_financialmetrics</h4>
+        <p>id PK · data_set_id FK 1:1 · roa · roe · tier1_ratio · loss_rate · efficiency_ratio · asset/loan/deposit_growth · credit_risk_score · liquidity_ratio · capital_adequacy · roa/roe/efficiency_vs_benchmark (all decimal 10,4) · calculated_at</p>
+      </div>
+      <div class="note">
+        <h4>analytics_financialinsight</h4>
+        <p>id PK · data_set_id FK · insight_type (executive_summary, trend_analysis, risk_assessment, benchmark_comparison, recommendations, strengths_weaknesses) · content · confidence_score · key_points · created_at · unique (data_set, insight_type)</p>
+      </div>
+      <div class="note">
+        <h4>analytics_financialreport</h4>
+        <p>id PK · data_set_id FK 1:1 · title · executive_summary · trend_analysis · financial_performance · risk_assessment · benchmark_comparison · recommendations · overall_score · risk_level (low, moderate, high, critical) · structured_data · generated_at · updated_at</p>
+      </div>
+      <div class="note">
+        <h4>analytics_analysistask</h4>
+        <p>id PK · upload_id FK 1:1 · task_id (unique) · status (pending, processing, completed, failed) · progress · result_data · error_message · created_at · completed_at</p>
+      </div>
+    </div>
+    <p class="prose">Django's built-in tables are also present: <code>auth_user</code> for accounts, <code>django_session</code> for sign-in sessions, <code>django_cache</code> for the shared cache (created by migration 0006), plus the usual admin, permission and content-type tables.</p>
+  </section>
+
+  <!-- LIMITATIONS -->
+  <section class="block" id="limitations">
+    <div class="head">
+      <div class="kicker">Part 5</div>
+      <h2>Known limitations</h2>
+    </div>
+    <ul class="limits">
+      <li><span class="pill mid">upload</span><span><strong>Every upload needs a dataset type, and the file must pass the keyword check.</strong> The bundled <code>sample_financial_data.json</code> (bank accounts and a summary) fails for all three types, so test with a real WACC, money market or instruments file.</span></li>
+      <li><span class="pill mid">speed</span><span><strong>The whole pipeline runs inside the upload request.</strong> A response can take up to about three minutes and holds a server thread meanwhile. Heavier use needs a background job queue.</span></li>
+      <li><span class="pill mid">prompts</span><span><strong>Shared prompts can be changed by any report owner.</strong> Regenerating a section saves the edited prompt onto the shared prompt module, and "save master prompt" overwrites the shared dataset prompt. Both affect everyone's next report, while the direct prompt editors are staff-only.</span></li>
+      <li><span class="pill no">frontend</span><span><strong>Three frontend calls point at legacy endpoints.</strong> <code>api.js</code> still requests report metrics, trends and benchmark data from tables the upload flow never fills, so they return 404. The AI status panel calls <code>/api/analytics/ai/…</code> instead of <code>/api/ai/…</code>.</span></li>
+      <li><span class="pill mid">frontend</span><span><strong>The TypeScript check fails</strong> on existing errors in <code>PromptReportSplitPane.vue</code>. Build with <code>npm run build-only</code> until they are fixed.</span></li>
+      <li><span class="pill info">storage</span><span><strong>Each report stores the uploaded file twice</strong> (original and normalized), up to 50 MB each, and the row is rewritten on every edit. The retention cleanup keeps growth in check.</span></li>
+    </ul>
+  </section>
+
+  <footer>Written from the source in this repository: <code>backend/analytics</code>, <code>backend/financial_analytics</code> and <code>frontend/src</code>. Describes the code as of 5 October 2026, after the changes in <a href="hardening-changes.html">Hardening AI Financial Analytics</a>.</footer>
+</div>
+
+<script type="module">
+  // Renders the ER diagrams. Without a network connection the diagram source text is shown instead.
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.esm.min.mjs';
+  const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  mermaid.initialize({ startOnLoad: false, theme: dark ? 'dark' : 'neutral' });
+  await mermaid.run({ querySelector: 'pre.mermaid' });
+</script>
+</body>
+</html>
