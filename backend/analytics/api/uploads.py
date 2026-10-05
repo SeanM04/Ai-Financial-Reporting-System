@@ -7,10 +7,10 @@ from datetime import datetime
 from typing import Any
 
 from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
-from ..services.report_store import get_report, save_report, update_report
+from .access import ai_rate_limited, api_login_required, report_access_required
+from ..services.report_store import get_report, save_report, update_report, user_can_access_report
 from django.conf import settings
 from ..services.prompt_module_store import apply_section_traceability
 from ..services.analysis_prompt_defaults import (
@@ -48,7 +48,8 @@ DATASET_TYPE_RULES: dict[str, dict[str, Any]] = {
             ['capital structure', 'capital_structure', 'equity ratio', 'debt ratio'],
             ['beta', 'risk free rate', 'risk-free rate', 'market risk premium'],
         ],
-        'missing_indicators': ['cost of equity', 'cost of debt', 'tax rate', 'capital structure', 'WACC'],
+        'missing_indicators': ['cost of equity', 'cost of debt',
+                                'tax rate', 'capital structure', 'WACC'],
     },
     'money_market': {
         'label': 'Money Market',
@@ -62,7 +63,8 @@ DATASET_TYPE_RULES: dict[str, dict[str, Any]] = {
             ['repo rate', 'repo rates', 'repurchase agreement'],
             ['liquidity', 'short-term', 'short term'],
         ],
-        'missing_indicators': ['treasury bills', 'commercial paper', 'certificates of deposit', 'interbank rates', 'repo rates'],
+        'missing_indicators': ['treasury bills', 'commercial paper',
+                                'certificates of deposit', 'interbank rates', 'repo rates'],
     },
     'financial_instruments': {
         'label': 'Financial Instruments',
@@ -82,6 +84,12 @@ DATASET_TYPE_RULES: dict[str, dict[str, Any]] = {
 
 
 def _collect_text_tokens(value: Any, parts: list[str], depth: int = 0) -> None:
+    """Append every key, string and number found in a JSON value to ``parts``.
+
+    Used to build the text that dataset-type detection searches. Walks nested
+    objects and arrays up to 8 levels deep and reads only the first 100 items of
+    each array, so very large files stay fast. Booleans and nulls are skipped.
+    """
     if depth > 8:
         return
     if isinstance(value, dict):
@@ -98,6 +106,15 @@ def _collect_text_tokens(value: Any, parts: list[str], depth: int = 0) -> None:
 
 
 def _infer_dataset_type(json_data: Any) -> str | None:
+    """Guess which dataset type a JSON file contains from its keys and values.
+
+    Each type in DATASET_TYPE_RULES has six keyword groups. A type scores one
+    point for every group with at least one keyword in the file (case-insensitive
+    substring match). The highest score wins, with ties going to the type listed
+    first in DATASET_TYPE_RULES.
+
+    Returns the winning type key, or None when no type matches at least two groups.
+    """
     parts: list[str] = []
     _collect_text_tokens(json_data, parts)
     text = ' '.join(parts).lower()
@@ -120,6 +137,16 @@ def _infer_dataset_type(json_data: Any) -> str | None:
 
 
 def _validate_dataset_type(json_data: Any, selected_type: str) -> tuple[bool, str | None, str | None]:
+    """Check that an uploaded file matches the dataset type the user selected.
+
+    Returns ``(is_valid, detected_type, error_message)``:
+
+    - ``(True, type, None)`` when detection agrees with the selection.
+    - ``(False, other_type, message)`` when the file looks like a different type;
+      the message names both types.
+    - ``(False, None, message)`` when the selection is not a known type, or when no
+      type could be detected; the message lists indicators the file should contain.
+    """
     selected = (selected_type or '').strip().lower()
     if selected not in DATASET_TYPE_RULES:
         return False, None, 'Please select one dataset type before uploading: WACC, Money Market, or Financial Instruments.'
@@ -145,10 +172,25 @@ def _validate_dataset_type(json_data: Any, selected_type: str) -> tuple[bool, st
     )
 
 
-@csrf_exempt
 @require_http_methods(["POST"])
+@api_login_required
+@ai_rate_limited
 def simple_custom_prompt_view(request):
-    """Generate analysis using custom prompt on uploaded JSON data."""
+    """Answer a custom analysis prompt about an existing report's data.
+
+    POST /api/simple-custom-prompt/ (signed-in owner of the report, or staff;
+    counts towards the hourly AI limit)
+    Body: {"report_id": "...", "prompt": "...", "report_options": {...}}
+
+    Sends the report's original uploaded JSON and the prompt to OpenAI and returns
+    the generated sections in ``analysis``. Nothing is saved to the report.
+    Only real AI output is returned: rule-based fallback sections would ignore the
+    prompt, so when AI is unavailable the response is 503 with the reason.
+
+    Returns 400 for a missing report_id or prompt, invalid JSON, or a report with
+    no stored original data, and 404 when the report doesn't exist or belongs to
+    someone else.
+    """
     try:
         body = json.loads(request.body)
         report_id = body.get('report_id')
@@ -158,7 +200,7 @@ def simple_custom_prompt_view(request):
         if not report_id or not custom_prompt:
             return JsonResponse({'error': 'report_id and prompt are required'}, status=400)
 
-        report = get_report(str(report_id))
+        report = get_report(str(report_id)) if user_can_access_report(request.user, str(report_id)) else None
         if not report:
             return JsonResponse({'error': 'Report not found'}, status=404)
 
@@ -180,7 +222,8 @@ def simple_custom_prompt_view(request):
             'report_options': report_options,
         })
 
-        if analysis_result and analysis_result.get('success'):
+        # Rule-based fallback sections ignore the custom prompt, so only AI output answers it.
+        if analysis_result and analysis_result.get('success') and analysis_result.get('ai_enhanced'):
             return JsonResponse({
                 'success': True,
                 'analysis': analysis_result.get('sections', []),
@@ -188,20 +231,53 @@ def simple_custom_prompt_view(request):
             })
 
         error_msg = analysis_result.get('error', 'Unknown error') if analysis_result else 'Unknown error'
-        return JsonResponse({'success': False, 'error': error_msg}, status=500)
+        return JsonResponse({'success': False, 'error': error_msg}, status=503)
     except json.JSONDecodeError:
         return JsonResponse({'error': 'Invalid JSON in request body'}, status=400)
-    except Exception as exc:
-        return JsonResponse({'error': str(exc)}, status=500)
+    except Exception:
+        logger.exception('Custom prompt analysis failed')
+        return JsonResponse({'error': 'Custom analysis failed.'}, status=500)
 
 
-@csrf_exempt
 @require_http_methods(["POST"])
+@api_login_required
+@ai_rate_limited
 def simple_upload_view(request):
-    """Simple Django upload view - no DRF."""
+    """Upload a JSON dataset and generate its report in the same request.
+
+    POST /api/simple-upload/ (signed in; counts towards the hourly AI limit)
+
+    Multipart form fields:
+        file: the dataset, a UTF-8 ``.json`` file.
+        dataset_type: "wacc", "money_market" or "financial_instruments".
+        description: optional free text stored with the report.
+        report_options: optional JSON string with template, sections,
+            include_sections, exclude_sections, length, detail_level and
+            output_format. length, detail_level and output_format may also be
+            sent as separate fields. A JSON request body is accepted too.
+
+    Steps:
+        1. Check the file and confirm its contents match the dataset type.
+        2. Load that type's analysis prompt and split it into one prompt per
+           report section, filling gaps from the section's prompt module.
+        3. Save a "processing" report owned by the uploader, and save each
+           section prompt onto its prompt module as a new version.
+        4. Ask OpenAI for every section. If AI is unavailable, rule-based
+           sections are used and the reason is returned as a warning.
+        5. Save the completed report and record which prompt version produced
+           each section.
+
+    Returns the complete report plus ``message``, and ``warning`` /
+    ``warning_code`` when AI was unavailable. Returns 400 when the file is
+    missing, not ``.json``, not UTF-8, invalid or empty JSON, when no dataset type
+    was chosen, or when the contents don't match it. Because generation happens
+    inside this request, a response can take a few minutes.
+    """
     try:
         body = {}
-        if request.body:
+        # Only JSON requests carry options in the body. For multipart uploads the CSRF
+        # check has already read the form, and touching request.body would raise.
+        if request.content_type == 'application/json' and request.body:
             try:
                 body = json.loads(request.body)
             except json.JSONDecodeError:
@@ -343,6 +419,11 @@ def simple_upload_view(request):
             pass
 
         def _compose_master_prompt_from_section_prompts(keys: list[str], prompts: dict[str, str]) -> str:
+            """Join per-section prompts into one master prompt with section markers.
+
+            Each section becomes a ``[SECTION:key] ... [/SECTION]`` block, in the
+            order of ``keys``, separated by blank lines. Blank keys are skipped.
+            """
             parts: list[str] = []
             for k in keys or []:
                 section_key = str(k).strip()
@@ -520,10 +601,21 @@ def simple_upload_view(request):
         return JsonResponse({'error': str(exc)}, status=500)
 
 
-@csrf_exempt
 @require_http_methods(["GET"])
+@report_access_required
 def simple_task_status_view(request, task_id):
-    """Return the latest report processing status for a task id."""
+    """Report the processing status of an upload.
+
+    GET /api/tasks/<task_id>/ (signed-in owner of the report, or staff)
+
+    The task id is the report id returned by the upload. The response holds
+    ``status`` ("processing", "completed" or "failed"), ``progress`` (35 while
+    processing, otherwise 100 unless the report stored its own value) and a short
+    message. Uploads finish within their own request, so by the time a client can
+    ask, the status is normally "completed".
+
+    Returns 404 when the report doesn't exist or belongs to someone else.
+    """
     report_id = str(task_id)
     report = get_report(report_id)
     if not report:

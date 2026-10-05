@@ -1,4 +1,5 @@
 import json
+import re
 import uuid
 import time
 import os
@@ -27,6 +28,7 @@ from docx import Document
 import openpyxl
 from openpyxl.styles import Font, Alignment
 
+from .api.access import ai_rate_limited, api_staff_required, hit_counter, report_access_required
 from .services.dynamic_report_builder import build_dynamic_report_sections, build_report_context
 from .services.report_prompt_registry import get_report_prompt_registry
 from .services.report_store import get_report as get_persisted_report
@@ -34,6 +36,40 @@ from .services.report_store import list_report_ids
 from .services.report_store import list_reports as list_persisted_reports
 from .services.report_store import save_report as save_persisted_report
 from .services.report_store import update_report as update_persisted_report
+
+from .services.insight_engine import FinancialInsightEngine
+
+from openai import APIStatusError
+
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+from rest_framework.response import Response
+from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.views import APIView
+from rest_framework.pagination import PageNumberPagination
+
+from .models import (
+    FinancialDataUpload, FinancialDataSet, FinancialMetrics,
+    FinancialInsight, FinancialReport, AnalysisTask
+)
+from .serializers import (
+    FinancialDataUploadSerializer, FinancialReportSerializer,
+    ReportSummarySerializer, AnalysisTaskSerializer,
+    UploadResponseSerializer, AnalysisRequestSerializer,
+    TaskStatusSerializer, DetailedReportSerializer,
+    ReportFilterSerializer, FileUploadRequestSerializer
+)
+from .services.data_parser import FinancialDataParser
+from .services.metrics_engine import FinancialMetricsEngine
+from .services.insight_engine import FinancialInsightEngine
+from .services.report_generator import FinancialReportGenerator
+
+from django.utils import timezone
+# Check database connection
+from django.db import connection
+
+
+
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +104,6 @@ def parse_openai_error(exc):
     error_type = ''
 
     try:
-        from openai import APIStatusError
         if isinstance(exc, APIStatusError):
             body = getattr(exc, 'body', None) or {}
             if isinstance(body, dict):
@@ -119,7 +154,8 @@ def extract_entity_metadata(json_data):
         'company', 'company_name', 'companyName', 'organization', 'organisation',
         'entity', 'entity_name', 'client', 'client_name', 'legal_name', 'name',
     )
-    period_keys = ('period', 'data_period', 'reporting_period', 'asOf', 'Asof', 'date', 'report_date', 'year')
+    period_keys = ('period', 'data_period', 'reporting_period', 'asOf',
+                    'Asof', 'date', 'report_date', 'year')
 
     def scan(obj, depth=0):
         nonlocal bank_name, period
@@ -181,7 +217,11 @@ def normalize_json_for_analysis(json_data):
 
 
 def generate_analysis_from_prompt(prompt, json_data, ai_analysis, report_options=None, section_prompt_overrides=None):
-    """Generate comprehensive report sections from the user's prompt using AI only."""
+    """Generate report sections from the user's prompt.
+
+    Returns (sections, error_msg, ai_enhanced). When AI is unavailable the sections
+    may be rule-based fallbacks: ai_enhanced is then False and error_msg says why.
+    """
     bank_name, data_period = extract_entity_metadata(json_data)
     normalized_data, _ = normalize_json_for_analysis(json_data)
 
@@ -200,9 +240,14 @@ def generate_analysis_from_prompt(prompt, json_data, ai_analysis, report_options
 
     analysis_result = generate_comprehensive_ai_analysis(analysis_context)
     if analysis_result and analysis_result.get('success'):
-        return analysis_result.get('sections', []), '', True
+        return (
+            analysis_result.get('sections', []),
+            analysis_result.get('error', ''),
+            bool(analysis_result.get('ai_enhanced', False)),
+        )
 
-    error_msg = analysis_result.get('error', 'AI analysis failed') if analysis_result else 'AI analysis failed'
+    error_msg = analysis_result.get('error',
+                                     'AI analysis failed') if analysis_result else 'AI analysis failed'
     return [], error_msg, False
 
 def _export_plain_text(value, max_len=8000):
@@ -238,7 +283,6 @@ def _append_comprehensive_section_pdf(story, section, styles):
 
 def _add_justified_paragraph(doc, text, style=None):
     """Add a paragraph with justified alignment (Word exports)."""
-    from docx.enum.text import WD_ALIGN_PARAGRAPH
 
     paragraph = doc.add_paragraph(str(text), style=style) if style else doc.add_paragraph(str(text))
     paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
@@ -246,7 +290,6 @@ def _add_justified_paragraph(doc, text, style=None):
 
 
 def _append_comprehensive_section_word(doc, section):
-    from docx.enum.text import WD_ALIGN_PARAGRAPH
 
     heading = doc.add_heading(str(section.get('title', 'Section')), level=2)
     heading.alignment = WD_ALIGN_PARAGRAPH.LEFT
@@ -295,14 +338,13 @@ def generate_csv_report(report_data):
         content = section.get('content', {})
         narrative = content.get('content', '') if isinstance(content, dict) else str(content)
         output.write(f"\"{title}\",\"{str(narrative).replace(chr(10), ' ')}\"\n")
-    
+
     content = output.getvalue()
     output.close()
     return content
 
 def generate_word_report(report_data):
     """Generate Word document report with justified body text."""
-    from docx.enum.text import WD_ALIGN_PARAGRAPH
 
     doc = Document()
 
@@ -339,23 +381,23 @@ def generate_excel_report(report_data):
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Financial Analysis Report"
-    
+
     # Set up headers
     ws['A1'] = "Report Field"
     ws['B1'] = "Value"
-    
+
     # Add basic info
     ws['A2'] = "Bank Name"
     ws['B2'] = report_data.get('bank_name', 'Unknown')
-    
+
     ws['A3'] = "Data Period"
     ws['B3'] = report_data.get('data_period', 'Unknown')
-    
+ 
     ws['A4'] = "Upload Date"
     ws['B4'] = report_data.get('uploaded_at', 'Unknown')
-    
+
     row = 6
-    
+
     # Add metrics
     metrics = report_data.get('data_summary', {})
     for key, value in metrics.items():
@@ -363,40 +405,19 @@ def generate_excel_report(report_data):
             ws[f'A{row}'] = key
             ws[f'B{row}'] = str(value)
             row += 1
-    
+
     # Add AI analysis summary
     ai_analysis = report_data.get('ai_analysis', {})
     if 'analysis_summary' in ai_analysis:
         ws[f'A{row}'] = "Analysis Summary"
         ws[f'B{row}'] = ai_analysis['analysis_summary']
         row += 1
-    
+
     # Save to buffer
     buffer = io.BytesIO()
     wb.save(buffer)
     buffer.seek(0)
     return buffer.getvalue()
-
-from rest_framework.response import Response
-from rest_framework.parsers import MultiPartParser, FormParser
-from rest_framework.views import APIView
-from rest_framework.pagination import PageNumberPagination
-
-from .models import (
-    FinancialDataUpload, FinancialDataSet, FinancialMetrics,
-    FinancialInsight, FinancialReport, AnalysisTask
-)
-from .serializers import (
-    FinancialDataUploadSerializer, FinancialReportSerializer,
-    ReportSummarySerializer, AnalysisTaskSerializer,
-    UploadResponseSerializer, AnalysisRequestSerializer,
-    TaskStatusSerializer, DetailedReportSerializer,
-    ReportFilterSerializer, FileUploadRequestSerializer
-)
-from .services.data_parser import FinancialDataParser
-from .services.metrics_engine import FinancialMetricsEngine
-from .services.insight_engine import FinancialInsightEngine
-from .services.report_generator import FinancialReportGenerator
 
 
 @csrf_exempt
@@ -585,9 +606,9 @@ def simple_upload_view(request):
 @method_decorator(csrf_exempt, name='dispatch')
 class FinancialDataUploadView(APIView):
     """Handle financial data file uploads"""
-    
+
     parser_classes = [MultiPartParser, FormParser]
-    permission_classes = []  # Temporarily disable for testing
+    permission_classes = [permissions.IsAuthenticated]
     
     def post(self, request):
         """Upload and process financial data file"""
@@ -596,7 +617,7 @@ class FinancialDataUploadView(APIView):
             logger.debug("User authenticated: %s", request.user.is_authenticated)
             logger.debug("User: %s", request.user)
             logger.debug("Session key: %s", request.session.session_key)
-            
+
             # Validate request data
             request_serializer = FileUploadRequestSerializer(data=request.data)
             if not request_serializer.is_valid():
@@ -604,7 +625,7 @@ class FinancialDataUploadView(APIView):
                     {'error': 'Validation failed', 'details': request_serializer.errors},
                     status=status.HTTP_400_BAD_REQUEST
                 )
-            
+
             # Create upload record
             upload = FinancialDataUpload.objects.create(
                 user=request.user,
@@ -612,13 +633,13 @@ class FinancialDataUploadView(APIView):
                 original_filename=request.FILES['file'].name,
                 status='uploaded'
             )
-            
+
             # Parse and validate JSON data
             try:
                 data = json.loads(request.FILES['file'].read().decode('utf-8'))
                 parser = FinancialDataParser()
                 parsed_data = parser.parse_financial_data(data)
-                
+
                 # Create data set record
                 data_set = FinancialDataSet.objects.create(
                     upload=upload,
@@ -629,34 +650,34 @@ class FinancialDataUploadView(APIView):
                     data_period=parsed_data.get('dashboard', {}).get('period', ''),
                     bank_name=parsed_data.get('dashboard', {}).get('bank_name', '')
                 )
-                
+
                 # Trigger async analysis
                 task = AnalysisTask.objects.create(
                     upload=upload,
                     task_id=str(uuid.uuid4()),
                     status='pending'
                 )
-                
+
                 # Start Celery task
                 process_financial_analysis.delay(task.task_id, data_set.id)
-                
+
                 upload.status = 'processing'
                 upload.save()
-                
+
                 response_data = {
                     'upload_id': upload.id,
                     'task_id': task.task_id,
                     'status': 'processing',
                     'message': 'File uploaded successfully. Analysis started.'
                 }
-                
+
                 return Response(response_data, status=status.HTTP_201_CREATED)
                 
             except json.JSONDecodeError:
                 upload.status = 'failed'
                 upload.error_message = 'Invalid JSON format'
                 upload.save()
-                
+
                 return Response(
                     {'error': 'Invalid JSON file format'},
                     status=status.HTTP_400_BAD_REQUEST
@@ -665,12 +686,12 @@ class FinancialDataUploadView(APIView):
                 upload.status = 'failed'
                 upload.error_message = str(e)
                 upload.save()
-                
+
                 return Response(
                     {'error': 'Data parsing failed', 'message': str(e)},
                     status=status.HTTP_400_BAD_REQUEST
                 )
-                
+
         except Exception as e:
             return Response(
                 {'error': 'Upload failed', 'message': str(e)},
@@ -682,12 +703,12 @@ class AnalysisStatusView(APIView):
     """Check analysis task status"""
     
     permission_classes = [permissions.IsAuthenticated]
-    
+
     def get(self, request, task_id):
         """Get status of analysis task"""
         try:
             task = AnalysisTask.objects.get(task_id=task_id, upload__user=request.user)
-            
+    
             response_data = {
                 'task_id': task.task_id,
                 'status': task.status,
@@ -696,13 +717,13 @@ class AnalysisStatusView(APIView):
                 'created_at': task.created_at,
                 'completed_at': task.completed_at
             }
-            
+
             if task.status == 'completed' and task.result_data:
                 response_data['result_data'] = task.result_data
                 response_data['report_id'] = task.result_data.get('report_id')
-            
+
             return Response(response_data)
-            
+
         except AnalysisTask.DoesNotExist:
             return Response(
                 {'error': 'Task not found'},
@@ -727,35 +748,35 @@ class FinancialReportViewSet(viewsets.ReadOnlyModelViewSet):
         queryset = FinancialReport.objects.filter(
             data_set__upload__user=self.request.user
         ).select_related('data_set', 'data_set__upload')
-        
+
         # Apply filters
         serializer = ReportFilterSerializer(data=self.request.query_params)
         if serializer.is_valid():
             filters = serializer.validated_data
-            
+
             if filters.get('bank_name'):
                 queryset = queryset.filter(
                     data_set__bank_name__icontains=filters['bank_name']
                 )
-            
+
             if filters.get('risk_level'):
                 queryset = queryset.filter(risk_level=filters['risk_level'])
-            
+
             if filters.get('min_score') is not None:
                 queryset = queryset.filter(overall_score__gte=filters['min_score'])
-            
+
             if filters.get('max_score') is not None:
                 queryset = queryset.filter(overall_score__lte=filters['max_score'])
-            
+
             if filters.get('date_from'):
                 queryset = queryset.filter(generated_at__date__gte=filters['date_from'])
-            
+
             if filters.get('date_to'):
                 queryset = queryset.filter(generated_at__date__lte=filters['date_to'])
-            
+
             ordering = filters.get('ordering', '-generated_at')
             queryset = queryset.order_by(ordering)
-        
+
         return queryset
     
     def retrieve(self, request, pk=None):
@@ -784,7 +805,7 @@ class ReportDetailView(APIView):
             report = FinancialReport.objects.get(
                 id=report_id, data_set__upload__user=request.user
             )
-            
+
             # Return structured report data
             return Response(report.structured_data)
             
@@ -793,7 +814,6 @@ class ReportDetailView(APIView):
                 {'error': 'Report not found'},
                 status=status.HTTP_404_NOT_FOUND
             )
-
 
 class MetricsSummaryView(APIView):
     """Get metrics summary for a report"""
@@ -806,7 +826,7 @@ class MetricsSummaryView(APIView):
             report = FinancialReport.objects.get(
                 id=report_id, data_set__upload__user=request.user
             )
-            
+
             # Extract metrics from report
             key_metrics = report.structured_data.get('key_metrics', {})
             
@@ -869,7 +889,7 @@ class BenchmarkComparisonView(APIView):
 
 class ExportReportView(APIView):
     """Export report in various formats"""
-    
+
     permission_classes = [permissions.IsAuthenticated]
     
     def get(self, request, report_id):
@@ -878,10 +898,10 @@ class ExportReportView(APIView):
             report = FinancialReport.objects.get(
                 id=report_id, data_set__upload__user=request.user
             )
-            
+
             export_format = request.query_params.get('format', 'json')
             include_raw_data = request.query_params.get('include_raw_data', 'false').lower() == 'true'
-            
+
             if export_format == 'json':
                 return self._export_json(report, include_raw_data)
             elif export_format == 'pdf':
@@ -893,7 +913,7 @@ class ExportReportView(APIView):
                     {'error': 'Unsupported export format'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
-                
+ 
         except FinancialReport.DoesNotExist:
             return Response(
                 {'error': 'Report not found'},
@@ -904,15 +924,15 @@ class ExportReportView(APIView):
                 {'error': 'Export failed', 'message': str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-    
+
     def _export_json(self, report, include_raw_data):
         """Export report as JSON"""
         data = report.structured_data
-        
+
         if not include_raw_data:
             # Remove raw data sections
             data.pop('appendix', None)
-        
+
         response = JsonResponse(data)
         response['Content-Disposition'] = f'attachment; filename="{report.title}.json"'
         return response
@@ -924,7 +944,7 @@ class ExportReportView(APIView):
             {'error': 'PDF export not yet implemented'},
             status=status.HTTP_501_NOT_IMPLEMENTED
         )
-    
+
     def _export_excel(self, report, include_raw_data):
         """Export report as Excel"""
         # Implementation would use pandas ExcelWriter
@@ -936,7 +956,7 @@ class ExportReportView(APIView):
 
 class UserUploadsView(APIView):
     """Get user's upload history"""
-    
+
     permission_classes = [permissions.IsAuthenticated]
     
     def get(self, request):
@@ -944,7 +964,7 @@ class UserUploadsView(APIView):
         uploads = FinancialDataUpload.objects.filter(
             user=request.user
         ).order_by('-uploaded_at')
-        
+
         serializer = FinancialDataUploadSerializer(uploads, many=True)
         return Response(serializer.data)
 
@@ -952,19 +972,15 @@ class UserUploadsView(APIView):
 @method_decorator(csrf_exempt, name='dispatch')
 class SystemHealthView(APIView):
     """System health check endpoint"""
-    
+
     permission_classes = [permissions.AllowAny]
-    
+
     def get(self, request):
         """Check system health"""
         try:
-            from django.utils import timezone
-            
-            # Check database connection
-            from django.db import connection
+
             with connection.cursor() as cursor:
                 cursor.execute("SELECT 1")
-            
             # Simple health check
             return Response({
                 'status': 'healthy',
@@ -972,7 +988,7 @@ class SystemHealthView(APIView):
                 'timestamp': timezone.now().isoformat(),
                 'version': '1.0.0'
             })
-            
+
         except Exception as e:
             from django.utils import timezone
             return Response({
@@ -996,15 +1012,15 @@ def analyze_direct_data(request):
                 {'error': 'financial_data is required'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         # Parse and analyze data
         parser = FinancialDataParser()
         parsed_data = parser.parse_financial_data(data)
-        
+
         # Generate report
         generator = FinancialReportGenerator()
         report_data = generator.generate_complete_report(parsed_data, report_options=report_options)
-        
+
         return Response(report_data)
         
     except Exception as e:
@@ -1015,7 +1031,8 @@ def analyze_direct_data(request):
 
 
 @api_view(['GET'])
-@permission_classes([])  # Temporarily disable authentication for testing
+@permission_classes([IsAuthenticated])
+@report_access_required
 def get_insights(request, report_id):
     """Get AI insights for a specific report section"""
     try:
@@ -1054,7 +1071,9 @@ def get_insights(request, report_id):
 
 
 @api_view(['POST'])
-@permission_classes([])  # Temporarily disable authentication for testing
+@permission_classes([IsAuthenticated])
+@report_access_required
+@ai_rate_limited
 def regenerate_insights(request, report_id):
     """Regenerate AI insights for a report"""
     try:
@@ -1280,7 +1299,7 @@ def simple_export_view(request, report_id):
 
         logger.debug("Export - report keys: %s", list(report.keys()))
         logger.debug("Export - report data type: %s", type(report))
-        
+
         # Create export data
         try:
             export_data = {
@@ -1297,16 +1316,16 @@ def simple_export_view(request, report_id):
         except Exception as e:
             logger.debug("Export - error creating export data: %s", e)
             return JsonResponse({'error': f'Export data creation failed: {str(e)}'}, status=500)
-        
+
         format = request.GET.get('format', 'json')
-        
+
         if format == 'json':
             # Return structured export data as JSON
             response = JsonResponse(export_data)
             response['Content-Disposition'] = f'attachment; filename="financial_report_{report_id}.json"'
             response['Content-Type'] = 'application/json'
             return response
-        
+
         elif format == 'pdf':
             try:
                 pdf_content = generate_pdf_report(report)
@@ -1315,7 +1334,7 @@ def simple_export_view(request, report_id):
                 return response
             except Exception as e:
                 return JsonResponse({'error': f'PDF generation failed: {str(e)}'}, status=500)
-        
+
         elif format == 'csv':
             try:
                 csv_content = generate_csv_report(report)
@@ -1324,7 +1343,7 @@ def simple_export_view(request, report_id):
                 return response
             except Exception as e:
                 return JsonResponse({'error': f'CSV generation failed: {str(e)}'}, status=500)
-        
+
         elif format == 'word':
             try:
                 doc_content = generate_word_report(report)
@@ -1333,7 +1352,7 @@ def simple_export_view(request, report_id):
                 return response
             except Exception as e:
                 return JsonResponse({'error': f'Word document generation failed: {str(e)}'}, status=500)
-        
+
         elif format == 'excel':
             try:
                 excel_content = generate_excel_report(report)
@@ -1342,10 +1361,10 @@ def simple_export_view(request, report_id):
                 return response
             except Exception as e:
                 return JsonResponse({'error': f'Excel generation failed: {str(e)}'}, status=500)
-        
+
         else:
             return JsonResponse({'error': f'Unsupported format: {format}'}, status=400)
-            
+ 
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
 
@@ -1386,11 +1405,11 @@ def generate_comprehensive_report(request, report_id):
         })
         template_type = report_options.get('template', 'custom')
         format_type = report_options.get('output_format', 'json')
-        
+
         report = get_persisted_report(str(report_id))
         if not report:
             return JsonResponse({'error': 'Report not found'}, status=404)
-        
+
         # Generate comprehensive report based on template
         templates = registry.get_templates()
         template = templates.get(template_type, templates.get('custom', {}))
@@ -1406,7 +1425,7 @@ def generate_comprehensive_report(request, report_id):
                 'report_options': report_options,
             }
         }
-        
+
         # Return based on format
         if format_type == 'json':
             return JsonResponse(generated_report)
@@ -1422,7 +1441,7 @@ def generate_comprehensive_report(request, report_id):
             return response
         else:
             return JsonResponse({'error': f'Unsupported format: {format_type}'}, status=400)
-            
+  
     except json.JSONDecodeError:
         return JsonResponse({'error': 'Invalid JSON in request body'}, status=400)
     except Exception as e:
@@ -1470,7 +1489,7 @@ def generate_report_sections(sections, report_data):
         'benchmark_comparison',
         'recommendations',
     }
-    
+
     for section in sections:
         if section in dynamic_sections:
             built = build_dynamic_report_sections([section], report_data)
@@ -1500,7 +1519,7 @@ def generate_report_sections(sections, report_data):
         else:
             built = build_dynamic_report_sections([section], report_data)
             generated_sections[section] = built[0] if built else f"Section {section} not implemented yet"
-    
+
     return generated_sections
 
 def generate_key_metrics_section(report_data):
@@ -1601,7 +1620,7 @@ def generate_recommendations_section(report_data):
     """Generate recommendations section"""
     ai_analysis = report_data.get('ai_analysis', {})
     recommendations = ai_analysis.get('recommendations', [])
-    
+
     return {
         'title': 'Strategic Recommendations',
         'recommendations': recommendations if recommendations else [
@@ -1637,7 +1656,7 @@ def generate_compliance_status_section(report_data):
 
 def count_report_words(report_data):
     """Count approximate words in report"""
-    import re
+
     text = str(report_data)
     words = len(re.findall(r'\b\w+\b', text))
     return words
@@ -1939,8 +1958,36 @@ def generate_ai_financial_analysis(prompt, financial_data, report):
     return custom_report
 
 
+def _rule_based_fallback(context, reason, **details):
+    """Build data-driven sections without AI, flagged so callers can tell users why."""
+    report_options = context.get('report_options') or {}
+    sections = build_dynamic_report_sections(
+        report_options.get('sections', []),
+        context.get('financial_data', {}),
+        report_options,
+    )
+    if not sections:
+        return {'success': False, 'error': reason}
+    return {'success': True, 'sections': sections, 'ai_enhanced': False, 'error': reason, **details}
+
+
+def _reserve_daily_ai_call():
+    """Count one OpenAI request against OPENAI_DAILY_QUOTA_LIMIT. Returns (allowed, limit)."""
+    limit = int(getattr(settings, 'OPENAI_DAILY_QUOTA_LIMIT', 1000))
+    if limit <= 0:
+        return True, limit
+    # Same keys the AI usage page reads; keep a week of history.
+    used = hit_counter(f'openai_usage_{timezone.now().date().isoformat()}', 8 * 24 * 3600)
+    cache.set('openai_daily_usage', used, 24 * 3600)
+    return used <= limit, limit
+
+
 def generate_comprehensive_ai_analysis(context):
-    """Generate comprehensive AI analysis using OpenAI."""
+    """Generate comprehensive AI analysis using OpenAI.
+
+    Falls back to rule-based sections when AI is unavailable; those results carry
+    ai_enhanced=False and an 'error' explaining why.
+    """
     try:
         import openai
 
@@ -1948,7 +1995,10 @@ def generate_comprehensive_ai_analysis(context):
         api_key = get_openai_api_key()
         if not api_key:
             logger.debug("OpenAI API key not found")
-            return {'success': False, 'error': 'OpenAI API key not configured. Set OPENAI_API_KEY in backend/.env and restart the server.'}
+            return _rule_based_fallback(
+                context,
+                'OpenAI API key not configured. Set OPENAI_API_KEY in backend/.env and restart the server.',
+            )
 
         registry = get_report_prompt_registry()
         financial_payload = context.get('raw_financial_data', context.get('financial_data', {}))
@@ -2013,14 +2063,21 @@ def generate_comprehensive_ai_analysis(context):
         model = getattr(settings, 'OPENAI_MODEL', 'gpt-4o-mini')
         max_tokens = min(getattr(settings, 'OPENAI_MAX_TOKENS', 4096), 4096)
         temperature = getattr(settings, 'OPENAI_TEMPERATURE', 0.4)
-        logger.debug(
-            "OpenAI request model=%s key_set=%s key_prefix=%s...",
-            model,
-            bool(api_key),
-            api_key[:8],
-        )
+        logger.debug("OpenAI request model=%s key_set=%s", model, bool(api_key))
 
-        client = openai.OpenAI(api_key=api_key)
+        allowed, daily_limit = _reserve_daily_ai_call()
+        if not allowed:
+            return _rule_based_fallback(
+                context,
+                f'The daily limit of {daily_limit} AI requests has been reached. It resets at midnight UTC.',
+            )
+
+        # Fail before the web server's request timeout so the fallback can still respond.
+        client = openai.OpenAI(
+            api_key=api_key,
+            timeout=float(getattr(settings, 'OPENAI_TIMEOUT_SECONDS', 60)),
+            max_retries=int(getattr(settings, 'OPENAI_MAX_RETRIES', 2)),
+        )
 
         response = client.chat.completions.create(
             model=model,
@@ -2096,48 +2153,25 @@ def generate_comprehensive_ai_analysis(context):
                     'usage': usage,
                     'duration_ms': duration_ms,
                 }
-            fallback_sections = build_dynamic_report_sections(
-                report_options.get('sections', []),
-                context.get('financial_data', {}),
-                report_options,
+            return _rule_based_fallback(
+                context,
+                'AI response could not be parsed. Please try again.',
+                model_used=model_used,
+                usage=usage,
+                duration_ms=duration_ms,
             )
-            if fallback_sections:
-                return {
-                    'success': True,
-                    'sections': fallback_sections,
-                    'ai_enhanced': False,
-                    'model_used': model_used,
-                    'usage': usage,
-                    'duration_ms': duration_ms,
-                }
-            return {'success': False, 'error': 'AI response could not be parsed. Please try again.'}
 
-        fallback_sections = build_dynamic_report_sections(
-            report_options.get('sections', []),
-            context.get('financial_data', {}),
-            report_options,
+        return _rule_based_fallback(
+            context,
+            'AI returned an empty report. Please refine your prompt and try again.',
+            model_used=model_used,
+            usage=usage,
+            duration_ms=duration_ms,
         )
-        if fallback_sections:
-            return {
-                'success': True,
-                'sections': fallback_sections,
-                'ai_enhanced': False,
-                'model_used': model_used,
-                'usage': usage,
-                'duration_ms': duration_ms,
-            }
-        return {'success': False, 'error': 'AI returned an empty report. Please refine your prompt and try again.'}
 
     except Exception as e:
         logger.debug("OpenAI API error: %s", e)
-        fallback_sections = build_dynamic_report_sections(
-            (context.get('report_options') or {}).get('sections', []),
-            context.get('financial_data', {}),
-            context.get('report_options') or {},
-        )
-        if fallback_sections:
-            return {'success': True, 'sections': fallback_sections, 'ai_enhanced': False}
-        return {'success': False, 'error': parse_openai_error(e)}
+        return _rule_based_fallback(context, parse_openai_error(e))
 
 
 def generate_template_based_analysis(prompt, financial_data, bank_name, data_period):
@@ -2212,8 +2246,8 @@ def generate_template_based_analysis(prompt, financial_data, bank_name, data_per
     return sections
 
 
-@csrf_exempt
 @require_http_methods(["POST"])
+@api_staff_required
 def test_openai_view(request):
     """Test OpenAI functionality"""
     try:
@@ -2599,7 +2633,7 @@ def login_view(request):
                 {'error': 'Username and password are required'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         user = authenticate(request, username=username, password=password)
         
         if user is not None:
@@ -2634,13 +2668,11 @@ def login_view(request):
 def ai_status_view(request):
     """Get current AI system status and usage information"""
     try:
-        from .services.insight_engine import FinancialInsightEngine
-        
         engine = FinancialInsightEngine()
-        
+
         # Get quota status
         quota_status = engine._check_quota_status() if engine.use_openai else {}
-        
+
         # Get system status
         status_data = {
             'ai_enabled': engine.use_openai,
@@ -2665,9 +2697,9 @@ def ai_status_view(request):
                 'daily_quota_limit': getattr(settings, 'OPENAI_DAILY_QUOTA_LIMIT', 1000)
             }
         }
-        
+
         return Response(status_data)
-        
+
     except Exception as e:
         return Response(
             {'error': 'Failed to get AI status', 'message': str(e)},
@@ -2683,7 +2715,7 @@ def ai_usage_stats_view(request):
         # Get usage data from cache
         daily_usage = cache.get('openai_daily_usage', 0)
         daily_quota_limit = getattr(settings, 'OPENAI_DAILY_QUOTA_LIMIT', 1000)
-        
+
         # Get historical usage (last 7 days)
         usage_history = []
         for i in range(7):
@@ -2696,7 +2728,7 @@ def ai_usage_stats_view(request):
                 'quota_limit': daily_quota_limit,
                 'percentage': (day_usage / daily_quota_limit) * 100 if daily_quota_limit > 0 else 0
             })
-        
+
         stats_data = {
             'current_usage': daily_usage,
             'quota_limit': daily_quota_limit,
@@ -2705,9 +2737,9 @@ def ai_usage_stats_view(request):
             'usage_history': usage_history,
             'last_updated': timezone.now().isoformat()
         }
-        
+ 
         return Response(stats_data)
-        
+  
     except Exception as e:
         return Response(
             {'error': 'Failed to get usage stats', 'message': str(e)},
@@ -2724,17 +2756,17 @@ def ai_reset_quota_view(request):
             {'error': 'Admin access required'},
             status=status.HTTP_403_FORBIDDEN
         )
-    
+
     try:
         # Clear quota tracking
         cache.delete('openai_daily_usage')
         cache.delete('openai_quota_status')
-        
+
         return Response({
             'message': 'Quota tracking reset successfully',
             'reset_at': timezone.now().isoformat()
         })
-        
+
     except Exception as e:
         return Response(
             {'error': 'Failed to reset quota', 'message': str(e)},
@@ -2743,26 +2775,25 @@ def ai_reset_quota_view(request):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated])
+@permission_classes([permissions.IsAdminUser])  # Makes paid OpenAI calls.
 def ai_test_connection_view(request):
     """Test AI system connectivity and performance"""
     try:
-        from .services.insight_engine import FinancialInsightEngine
-        
+
         engine = FinancialInsightEngine()
-        
+
         # Test data
         test_metrics = {'roa': 1.5, 'roe': 12.0, 'overall_score': 75}
         test_data = {'dashboard': {'bank_name': 'Test Bank', 'period': '2024 Q1'}}
-        
+
         start_time = timezone.now()
-        
+
         # Generate test insights
         insights = engine.generate_all_insights(test_metrics, test_data)
-        
+
         end_time = timezone.now()
         response_time = (end_time - start_time).total_seconds()
-        
+
         test_results = {
             'test_successful': True,
             'insights_generated': len(insights),
@@ -2771,9 +2802,9 @@ def ai_test_connection_view(request):
             'confidence_scores': [insight.get('confidence_score', 0) for insight in insights.values()],
             'test_completed_at': end_time.isoformat()
         }
-        
+
         return Response(test_results)
-        
+
     except Exception as e:
         return Response(
             {'error': 'AI test failed', 'message': str(e)},

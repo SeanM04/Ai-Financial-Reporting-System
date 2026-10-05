@@ -1,4 +1,9 @@
-"""Persistent report storage backed by the database."""
+"""Persistent report storage backed by the database.
+
+Reports are always read from the database. They are not cached in process memory,
+because with several server processes a cached copy goes stale as soon as another
+process saves the report.
+"""
 
 from __future__ import annotations
 
@@ -6,35 +11,11 @@ import uuid
 from typing import Any
 
 from django.contrib.auth.models import AnonymousUser
+from django.core.exceptions import ValidationError
 from django.db.models import Q
 from django.utils import timezone
 
 from ..models import DataRetentionAuditLog, PersistedReport
-
-try:
-    from django.core.cache import cache
-except Exception:  # pragma: no cover - cache optional in tests
-    cache = None
-
-REPORT_CACHE_PREFIX = 'analytics:report:'
-REPORT_CACHE_TIMEOUT = 7 * 24 * 60 * 60
-
-
-def _report_cache_key(report_id: str) -> str:
-    return f'{REPORT_CACHE_PREFIX}{report_id}'
-
-
-def _cache_get(report_id: str) -> dict[str, Any] | None:
-    if cache is None:
-        return None
-    report = cache.get(_report_cache_key(str(report_id)))
-    return report if isinstance(report, dict) else None
-
-
-def _cache_set(report_id: str, report_data: dict[str, Any]) -> None:
-    if cache is None:
-        return
-    cache.set(_report_cache_key(str(report_id)), report_data, REPORT_CACHE_TIMEOUT)
 
 
 def _resolve_owner(request) -> tuple[Any | None, str]:
@@ -46,33 +27,43 @@ def _resolve_owner(request) -> tuple[Any | None, str]:
     return None, ''
 
 
+def visible_reports_q(user) -> Q:
+    """Reports a user may see: their own; staff also see reports with no owner."""
+    if user.is_staff:
+        return Q(owner=user) | Q(owner__isnull=True)
+    return Q(owner=user)
+
+
+def user_can_access_report(user, report_id: str) -> bool:
+    """Owners can open their reports. Staff can open any report, including unowned ones."""
+    if user is None or not user.is_authenticated:
+        return False
+    if user.is_staff:
+        return True
+    try:
+        return PersistedReport.objects.filter(pk=str(report_id), owner=user).exists()
+    except (ValueError, ValidationError):
+        return False
+
+
 def list_report_ids() -> list[str]:
     return [str(report_id) for report_id in PersistedReport.objects.values_list('id', flat=True)]
 
 
 def list_reports(request=None) -> list[dict[str, Any]]:
     user, _ = _resolve_owner(request)
-    if user is not None:
-        queryset = PersistedReport.objects.filter(Q(owner=user) | Q(owner__isnull=True))
-    else:
-        queryset = PersistedReport.objects.all()
+    if user is None:
+        return []
+    queryset = PersistedReport.objects.filter(visible_reports_q(user))
     return [record.report_data for record in queryset]
 
 
 def get_report(report_id: str) -> dict[str, Any] | None:
-    report_id = str(report_id)
-    cached = _cache_get(report_id)
-    if cached:
-        return cached
-
     try:
-        record = PersistedReport.objects.get(pk=report_id)
+        record = PersistedReport.objects.get(pk=str(report_id))
     except (PersistedReport.DoesNotExist, ValueError):
         return None
-
-    report = record.report_data
-    _cache_set(report_id, report)
-    return report
+    return record.report_data
 
 
 def get_report_record(report_id: str) -> PersistedReport | None:
@@ -89,15 +80,11 @@ def save_report(report_id: str, report_data: dict[str, Any], request=None) -> di
     report_data['id'] = report_id
 
     owner, owner_username = _resolve_owner(request)
-    PersistedReport.objects.update_or_create(
-        id=uuid.UUID(report_id),
-        defaults={
-            'report_data': report_data,
-            'owner': owner,
-            'owner_username': owner_username,
-        },
-    )
-    _cache_set(report_id, report_data)
+    defaults = {'report_data': report_data}
+    # Never clear an existing owner when a save happens without a logged-in user.
+    if owner is not None:
+        defaults.update({'owner': owner, 'owner_username': owner_username})
+    PersistedReport.objects.update_or_create(id=uuid.UUID(report_id), defaults=defaults)
     return report_data
 
 
@@ -118,10 +105,9 @@ def list_report_records(
     status: str = '',
 ) -> list[PersistedReport]:
     user, _ = _resolve_owner(request)
-    if user is not None:
-        queryset = PersistedReport.objects.filter(Q(owner=user) | Q(owner__isnull=True))
-    else:
-        queryset = PersistedReport.objects.all()
+    if user is None:
+        return []
+    queryset = PersistedReport.objects.filter(visible_reports_q(user))
 
     if not include_archived:
         queryset = queryset.filter(is_archived=False)

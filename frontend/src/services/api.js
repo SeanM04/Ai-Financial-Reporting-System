@@ -1,8 +1,10 @@
 import axios from 'axios'
 
-// API configuration — default /api uses Vite dev proxy (same-origin, avoids ad-blocker XHR blocks)
+// API configuration â€” default /api uses Vite dev proxy (same-origin, avoids ad-blocker XHR blocks)
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api'
 const API_TIMEOUT = parseInt(import.meta.env.VITE_API_TIMEOUT) || 30000
+// AI requests: OpenAI can take up to ~180s (60s x 3 attempts); matches Gunicorn and nginx timeouts.
+const LONG_REQUEST_TIMEOUT = 300000
 
 // Create axios instance
 const apiClient = axios.create({
@@ -14,12 +16,19 @@ const apiClient = axios.create({
   },
 })
 
-// Request interceptor - Django uses session cookies, no token needed
+function getCookie(name) {
+  const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`))
+  return match ? decodeURIComponent(match[1]) : null
+}
+
+const CSRF_SAFE_METHODS = ['get', 'head', 'options', 'trace']
+
+// Request interceptor - Django session auth; unsafe methods must echo the csrftoken cookie
 apiClient.interceptors.request.use(
   (config) => {
-    // Add CSRF token if needed for Django
-    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
-    if (csrfToken) {
+    const method = (config.method || 'get').toLowerCase()
+    const csrfToken = getCookie('csrftoken')
+    if (csrfToken && !CSRF_SAFE_METHODS.includes(method)) {
       config.headers['X-CSRFToken'] = csrfToken
     }
     return config
@@ -63,7 +72,7 @@ export const api = {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
-      timeout: 180000,
+      timeout: LONG_REQUEST_TIMEOUT,
     })
   },
 
@@ -104,7 +113,7 @@ export const api = {
     return apiClient.post(
       `/reports/${id}/insights/regenerate/`,
       { report_options: reportOptions },
-      { timeout: 180000 },
+      { timeout: LONG_REQUEST_TIMEOUT },
     )
   },
 
@@ -165,7 +174,7 @@ export const api = {
     return apiClient.post(
       `/simple-reports/${reportId}/sections/${encodeURIComponent(sectionKey)}/regenerate/`,
       payload,
-      { timeout: 180000 },
+      { timeout: LONG_REQUEST_TIMEOUT },
     )
   },
 

@@ -7,15 +7,15 @@ import re
 from datetime import datetime
 
 from django.http import HttpResponse, JsonResponse
-from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from django.db import transaction
 from django.core.cache import cache
+from rest_framework.authentication import SessionAuthentication
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
 from rest_framework.permissions import IsAdminUser, IsAuthenticated
 from django.contrib.auth import get_user_model
 
-from .authentication import CsrfExemptSessionAuthentication
+from .access import ai_rate_limited, api_login_required, report_access_required
 
 from ..models import UserSettings
 
@@ -63,23 +63,19 @@ from ..views import (
 )
 
 
-@csrf_exempt
 @require_http_methods(["GET"])
+@api_login_required
 def simple_reports_view(request):
-    """Return stored reports from the shared report store."""
+    """Return the reports the current user may see."""
     reports = list_reports(request)
     return JsonResponse({
         'results': reports,
         'count': len(reports),
-        'debug': {
-            'report_ids': list_report_ids(),
-            'source': 'database',
-        },
     })
 
 
-@csrf_exempt
 @require_http_methods(["GET"])
+@report_access_required
 def simple_report_detail_view(request, report_id):
     """Return a single report from the shared report store."""
     report = get_report(str(report_id))
@@ -88,9 +84,6 @@ def simple_report_detail_view(request, report_id):
             'error': 'Report not found',
             'report_id': str(report_id),
             'message': 'No matching report is available. Please upload a financial data file first.',
-            'debug': {
-                'available_ids': list_report_ids(),
-            },
         }, status=404)
 
     payload = dict(report)
@@ -103,8 +96,9 @@ def simple_report_detail_view(request, report_id):
 
 
 @api_view(['GET'])
-@authentication_classes([CsrfExemptSessionAuthentication])
+@authentication_classes([SessionAuthentication])
 @permission_classes([IsAuthenticated])
+@report_access_required
 def report_section_mappings_view(request, report_id):
     from ..services.prompt_module_store import get_report_section_mappings
 
@@ -114,10 +108,11 @@ def report_section_mappings_view(request, report_id):
     return JsonResponse({'report_id': str(report_id), 'section_mappings': mappings, 'count': len(mappings)})
 
 
-@csrf_exempt
 @api_view(['POST'])
-@authentication_classes([CsrfExemptSessionAuthentication])
+@authentication_classes([SessionAuthentication])
 @permission_classes([IsAuthenticated])
+@report_access_required
+@ai_rate_limited
 def regenerate_report_section_view(request, report_id, section_key):
     """Regenerate only one report section after validating and persisting its prompt."""
     from django.conf import settings
@@ -270,7 +265,8 @@ def regenerate_report_section_view(request, report_id, section_key):
         })
         generation_duration_ms = int((time.perf_counter() - generation_started) * 1000)
 
-        if not analysis_result or not analysis_result.get('success'):
+        # A rule-based fallback is not a regeneration; keep the existing section.
+        if not analysis_result or not analysis_result.get('success') or not analysis_result.get('ai_enhanced'):
             return JsonResponse({'error': (analysis_result or {}).get('error') or 'Section regeneration failed'}, status=503)
 
         new_sections = analysis_result.get('sections') or []
@@ -430,10 +426,10 @@ def regenerate_report_section_view(request, report_id, section_key):
         cache.delete(lock_key)
 
 
-@csrf_exempt
 @api_view(['POST'])
-@authentication_classes([CsrfExemptSessionAuthentication])
+@authentication_classes([SessionAuthentication])
 @permission_classes([IsAuthenticated])
+@report_access_required
 def save_master_prompt_to_dataset_prompt(request, report_id):
     """Save master prompt edits back to the Dataset Analysis Prompt."""
     try:
@@ -496,10 +492,10 @@ def save_master_prompt_to_dataset_prompt(request, report_id):
         return JsonResponse({'error': f'Failed to save master prompt: {str(e)}'}, status=500)
 
 
-@csrf_exempt
 @api_view(['GET'])
-@authentication_classes([CsrfExemptSessionAuthentication])
+@authentication_classes([SessionAuthentication])
 @permission_classes([IsAuthenticated])
+@report_access_required
 def report_section_history_view(request, report_id, section_key):
     report = get_report(str(report_id))
     if not report:
@@ -559,8 +555,8 @@ def _normalize_export_format(format_type):
     return aliases.get(normalized, normalized)
 
 
-@csrf_exempt
 @require_http_methods(["GET", "POST"])
+@report_access_required
 def simple_export_view(request, report_id, file_type=None):
     """Download a stored report in the requested format."""
     report = get_report(str(report_id))
@@ -628,7 +624,7 @@ def simple_export_view(request, report_id, file_type=None):
 
 
 @api_view(['GET'])
-@permission_classes([])
+@permission_classes([IsAuthenticated])
 def get_report_templates(request):
     """Get available report templates."""
     registry = get_report_prompt_registry()
@@ -640,7 +636,7 @@ def get_report_templates(request):
 
 
 @api_view(['GET'])
-@authentication_classes([CsrfExemptSessionAuthentication])
+@authentication_classes([SessionAuthentication])
 @permission_classes([IsAuthenticated])
 def get_report_prompt_config(request):
     """Return the editable prompt configuration."""
@@ -655,9 +651,8 @@ def get_report_prompt_config(request):
     })
 
 
-@csrf_exempt
 @api_view(['POST'])
-@authentication_classes([CsrfExemptSessionAuthentication])
+@authentication_classes([SessionAuthentication])
 @permission_classes([IsAdminUser])
 def update_report_prompt_config(request):
     """Persist report prompt configuration updates."""
@@ -680,7 +675,7 @@ def update_report_prompt_config(request):
 
 
 @api_view(['GET'])
-@authentication_classes([CsrfExemptSessionAuthentication])
+@authentication_classes([SessionAuthentication])
 @permission_classes([IsAuthenticated])
 def get_analysis_prompts(request):
     """Return persisted AI analysis prompts for the Upload page."""
@@ -692,9 +687,8 @@ def get_analysis_prompts(request):
     })
 
 
-@csrf_exempt
 @api_view(['POST'])
-@authentication_classes([CsrfExemptSessionAuthentication])
+@authentication_classes([SessionAuthentication])
 @permission_classes([IsAdminUser])
 def update_analysis_prompt_view(request):
     """Update a single analysis prompt in the database."""
@@ -722,9 +716,8 @@ def update_analysis_prompt_view(request):
     })
 
 
-@csrf_exempt
 @api_view(['POST'])
-@authentication_classes([CsrfExemptSessionAuthentication])
+@authentication_classes([SessionAuthentication])
 @permission_classes([IsAdminUser])
 def reset_analysis_prompts_view(request):
     """Reset one or all analysis prompts to their built-in defaults."""
@@ -828,9 +821,8 @@ def list_manageable_reports(request):
     return JsonResponse({'success': True, 'results': items, 'count': len(items)})
 
 
-@csrf_exempt
 @api_view(['POST'])
-@authentication_classes([CsrfExemptSessionAuthentication])
+@authentication_classes([SessionAuthentication])
 @permission_classes([IsAdminUser])
 def bulk_report_action(request):
     """Archive, restore, or delete reports in bulk."""
@@ -921,6 +913,9 @@ def preview_cleanup(request):
 
 
 @api_view(['POST'])
+@permission_classes([IsAuthenticated])
+@report_access_required
+@ai_rate_limited
 def generate_comprehensive_report(request, report_id):
     """Generate comprehensive financial report."""
     try:
@@ -982,7 +977,8 @@ def generate_comprehensive_report(request, report_id):
 
 
 @api_view(['GET'])
-@permission_classes([])
+@permission_classes([IsAuthenticated])
+@report_access_required
 def preview_report(request, report_id):
     """Preview report before generation."""
     report = get_report(str(report_id))
@@ -1000,8 +996,9 @@ def preview_report(request, report_id):
     return JsonResponse(preview_data)
 
 
-@csrf_exempt
 @require_http_methods(["POST"])
+@report_access_required
+@ai_rate_limited
 def simple_custom_report_view(request, report_id=None):
     """AI-powered custom report view using stored report data."""
     try:

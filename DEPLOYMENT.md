@@ -1,559 +1,200 @@
 # Deployment Guide
 
-This document provides comprehensive instructions for deploying the AI Financial Analytics System in various environments.
+How to run the AI Financial Analytics System on a Linux server. For running it on your own machine, see `README_CLEAN.md`.
 
-## Table of Contents
+## What runs in production
 
-1. [Prerequisites](#prerequisites)
-2. [Environment Setup](#environment-setup)
-3. [Docker Deployment](#docker-deployment)
-4. [Manual Deployment](#manual-deployment)
-5. [Production Configuration](#production-configuration)
-6. [Monitoring and Maintenance](#monitoring-and-maintenance)
+| Piece | Role |
+|---|---|
+| **nginx** | Serves the built Vue app, terminates HTTPS, forwards `/api/` and `/admin/` to Gunicorn |
+| **Gunicorn** | Runs Django (`backend/gunicorn.conf.py`) |
+| **PostgreSQL** | All data, plus the shared cache table used for rate limits and AI quota counters |
+| **Redis** (optional) | Replaces the cache table when `REDIS_URL` is set |
 
-## Prerequisites
+No Celery worker or Docker is needed. Report generation runs inside the upload request (see [Limits](#limits)).
 
-### System Requirements
+Requirements: Ubuntu 22.04+ (or similar), Python 3.12, Node.js 22, PostgreSQL 14+, nginx, and a domain name with DNS pointing at the server.
 
-- **Operating System**: Linux (Ubuntu 20.04+ recommended) or macOS
-- **Memory**: Minimum 4GB RAM, 8GB+ recommended
-- **Storage**: Minimum 20GB available space
-- **CPU**: 2+ cores recommended
-
-### Software Dependencies
-
-- Docker & Docker Compose
-- Python 3.11+
-- Node.js 18+
-- PostgreSQL 15+
-- Redis 7+
-- Nginx (for production)
-
-## Environment Setup
-
-### 1. Clone the Repository
+## 1. Database
 
 ```bash
-git clone <repository-url>
-cd ai-financial-analytics-system
+sudo -u postgres createuser --pwprompt financial_analytics
+sudo -u postgres createdb -O financial_analytics financial_analytics
 ```
 
-### 2. Environment Configuration
-
-Copy the environment template and configure:
+## 2. Backend
 
 ```bash
+sudo mkdir -p /srv/financial-analytics && sudo chown $USER /srv/financial-analytics
+git clone <repository-url> /srv/financial-analytics
+cd /srv/financial-analytics/backend
+python3.12 -m venv venv
+venv/bin/pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Edit `.env` with your specific values:
+Edit `backend/.env`. These values matter in production:
 
 ```bash
-# Database Configuration
-DB_HOST=localhost
-DB_NAME=financial_analytics
-DB_USER=postgres
-DB_PASSWORD=your-secure-password
-DB_PORT=5432
-
-# Django Configuration
 DEBUG=False
-SECRET_KEY=your-very-secure-secret-key
-ALLOWED_HOSTS=your-domain.com,www.your-domain.com
-
-# Celery Configuration
-CELERY_BROKER_URL=redis://localhost:6379/0
-CELERY_RESULT_BACKEND=redis://localhost:6379/0
-
-# OpenAI Configuration
-OPENAI_API_KEY=your-openai-api-key
-
-# Frontend Configuration
-VITE_API_URL=https://your-domain.com/api
+SECRET_KEY=<output of: python3 -c "import secrets; print(secrets.token_urlsafe(50))">
+ALLOWED_HOSTS=reports.example.com
+CORS_ALLOWED_ORIGINS=https://reports.example.com
+BEHIND_PROXY=true
+DB_NAME=financial_analytics
+DB_USER=financial_analytics
+DB_PASSWORD=<the password from step 1>
+DB_HOST=localhost
+OPENAI_API_KEY=<your key>
+OPENAI_DAILY_QUOTA_LIMIT=1000
+LOG_DIR=/var/log/financial-analytics
 ```
 
-### 3. Generate Django Secret Key
+With `DEBUG=False` the app refuses to start without a real `SECRET_KEY`, and it turns on HTTPS redirects, secure cookies and HSTS (`SECURE_HSTS_SECONDS` starts at 3600; raise it to 31536000 once HTTPS is confirmed). `BEHIND_PROXY=true` is required behind nginx, or the HTTPS redirect will loop.
+
+Then:
 
 ```bash
-python -c "import secrets; print(secrets.token_urlsafe(50))"
+sudo mkdir -p /var/log/financial-analytics && sudo chown $USER /var/log/financial-analytics
+venv/bin/python manage.py migrate          # also creates the cache table
+venv/bin/python manage.py createsuperuser
+venv/bin/python manage.py collectstatic --noinput
+venv/bin/python manage.py check --deploy   # expect only the optional HSTS subdomain/preload warnings
 ```
 
-Use the output as your `SECRET_KEY`.
-
-## Docker Deployment (Recommended)
-
-### 1. Build and Start Services
+## 3. Frontend
 
 ```bash
-# Start all services
-docker-compose up -d
-
-# Build images (first time or after changes)
-docker-compose build
-
-# View logs
-docker-compose logs -f
+cd /srv/financial-analytics/frontend
+npm ci
+npm run build-only      # outputs frontend/dist; VITE_API_URL=/api from frontend/.env
 ```
 
-### 2. Initialize Database
+`npm run build` also runs the TypeScript check, which currently fails on existing errors in `PromptReportSplitPane.vue`. Use `build-only` until those are fixed.
+
+## 4. Gunicorn service
+
+`/etc/systemd/system/financial-analytics.service`:
+
+```ini
+[Unit]
+Description=AI Financial Analytics (Gunicorn)
+After=network.target postgresql.service
+
+[Service]
+User=www-data
+Group=www-data
+WorkingDirectory=/srv/financial-analytics/backend
+ExecStart=/srv/financial-analytics/backend/venv/bin/gunicorn -c gunicorn.conf.py financial_analytics.wsgi:application
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+```
 
 ```bash
-# Run database migrations
-docker-compose exec backend python manage.py migrate
-
-# Create superuser
-docker-compose exec backend python manage.py createsuperuser
-
-# Collect static files
-docker-compose exec backend python manage.py collectstatic --noinput
+sudo chown -R www-data:www-data /var/log/financial-analytics
+sudo systemctl daemon-reload
+sudo systemctl enable --now financial-analytics
 ```
 
-### 3. Verify Deployment
+Gunicorn listens on `127.0.0.1:8000` with a 300-second timeout. Tune with `GUNICORN_WORKERS`, `GUNICORN_THREADS` and `GUNICORN_TIMEOUT`.
 
-Check service status:
+## 5. nginx and HTTPS
 
-```bash
-docker-compose ps
-```
-
-Test API endpoints:
-
-```bash
-curl http://localhost:8000/api/health/
-```
-
-### 4. Production Services
-
-For production, exclude the development frontend:
-
-```bash
-docker-compose --profile production up -d
-```
-
-## Manual Deployment
-
-### Backend Setup
-
-1. **Install Python Dependencies**
-
-```bash
-cd backend
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-pip install -r requirements.txt
-```
-
-2. **Database Setup**
-
-```bash
-# Create database
-createdb financial_analytics
-
-# Run migrations
-python manage.py migrate
-
-# Create superuser
-python manage.py createsuperuser
-```
-
-3. **Start Services**
-
-```bash
-# Start Django server
-gunicorn --bind 0.0.0.0:8000 --workers 4 financial_analytics.wsgi:application
-
-# Start Celery worker (separate terminal)
-celery -A financial_analytics worker --loglevel=info
-
-# Start Celery beat (separate terminal)
-celery -A financial_analytics beat --loglevel=info
-```
-
-### Frontend Setup
-
-1. **Install Dependencies**
-
-```bash
-cd frontend
-npm install
-```
-
-2. **Build for Production**
-
-```bash
-npm run build
-```
-
-3. **Serve with Nginx**
-
-Create `/etc/nginx/sites-available/financial-analytics`:
+`/etc/nginx/sites-available/financial-analytics`:
 
 ```nginx
 server {
     listen 80;
-    server_name your-domain.com;
+    server_name reports.example.com;
+    return 301 https://$host$request_uri;
+}
 
-    # Frontend
+server {
+    listen 443 ssl;
+    server_name reports.example.com;
+    # certbot fills in ssl_certificate lines
+
+    client_max_body_size 50m;          # matches the 50 MB upload limit
+
+    root /srv/financial-analytics/frontend/dist;
+
     location / {
-        root /path/to/frontend/dist;
         try_files $uri $uri/ /index.html;
     }
 
-    # Backend API
-    location /api {
-        proxy_pass http://localhost:8000;
+    location /static/ {
+        alias /srv/financial-analytics/backend/staticfiles/;
+    }
+
+    location ~ ^/(api|admin)/ {
+        proxy_pass http://127.0.0.1:8000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    # Static files
-    location /static/ {
-        alias /path/to/backend/staticfiles/;
-    }
-
-    # Media files
-    location /media/ {
-        alias /path/to/backend/media/;
+        proxy_read_timeout 300s;       # report generation can take minutes
     }
 }
 ```
-
-Enable site:
 
 ```bash
 sudo ln -s /etc/nginx/sites-available/financial-analytics /etc/nginx/sites-enabled/
-sudo nginx -t
-sudo systemctl reload nginx
+sudo nginx -t && sudo systemctl reload nginx
+sudo certbot --nginx -d reports.example.com
 ```
 
-## Production Configuration
+The frontend and API must share one origin (as above). Login uses a session cookie and CSRF token, which do not work across origins.
 
-### Security Settings
+## 6. Scheduled jobs
 
-1. **Django Settings**
+Add to the `www-data` crontab (`sudo crontab -u www-data -e`):
 
-```python
-# production.py
-DEBUG = False
-ALLOWED_HOSTS = ['your-domain.com', 'www.your-domain.com']
-
-# Security
-SECURE_SSL_REDIRECT = True
-SECURE_HSTS_SECONDS = 31536000
-SECURE_HSTS_INCLUDE_SUBDOMAINS = True
-SECURE_HSTS_PRELOAD = True
-SESSION_COOKIE_SECURE = True
-CSRF_COOKIE_SECURE = True
+```cron
+# 02:00 - delete reports past each user's retention period
+0 2 * * * cd /srv/financial-analytics/backend && venv/bin/python manage.py cleanup_old_data
+# 02:30 - remove expired login sessions
+30 2 * * * cd /srv/financial-analytics/backend && venv/bin/python manage.py clearsessions
 ```
 
-2. **Database Security**
+Database backup, in the `postgres` user's crontab (keeps 30 days):
+
+```cron
+0 3 * * * pg_dump financial_analytics | gzip > /var/backups/financial-analytics/db-$(date +\%F).sql.gz && find /var/backups/financial-analytics -name 'db-*.sql.gz' -mtime +30 -delete
+```
+
+Restore with `gunzip -c db-YYYY-MM-DD.sql.gz | psql financial_analytics`. Copy backups off the server as well.
+
+## 7. Monitoring
+
+- Health check for an uptime monitor: `GET https://reports.example.com/api/health/` returns `{"status": "healthy", "database": "connected", ...}`. It is exempt from the HTTPS redirect.
+- Application log: `$LOG_DIR/django.log`. Server errors are logged in full there; the browser only gets a generic message.
+- Service log: `journalctl -u financial-analytics -f`.
+- AI usage against the daily quota: the AI status page, or `GET /api/ai/usage/`.
+
+## 8. Updating
 
 ```bash
-# Create dedicated database user
-sudo -u postgres createuser --interactive financial_analytics_user
-sudo -u postgres createdb -O financial_analytics_user financial_analytics_db
+cd /srv/financial-analytics
+git pull
+backend/venv/bin/pip install -r backend/requirements.txt
+cd backend && venv/bin/python manage.py migrate && venv/bin/python manage.py collectstatic --noinput && cd ..
+cd frontend && npm ci && npm run build-only && cd ..
+sudo systemctl restart financial-analytics
 ```
 
-3. **Firewall Configuration**
-
-```bash
-# Allow HTTP/HTTPS
-sudo ufw allow 80
-sudo ufw allow 443
-
-# Allow SSH (if needed)
-sudo ufw allow 22
-
-# Enable firewall
-sudo ufw enable
-```
-
-### SSL/TLS Setup
-
-1. **Let's Encrypt Certificate**
-
-```bash
-sudo apt install certbot python3-certbot-nginx
-sudo certbot --nginx -d your-domain.com -d www.your-domain.com
-```
-
-2. **Auto-renewal**
-
-```bash
-sudo crontab -e
-# Add: 0 12 * * * /usr/bin/certbot renew --quiet
-```
-
-### Performance Optimization
-
-1. **Database Optimization**
-
-```sql
--- PostgreSQL configuration
--- Add to postgresql.conf
-shared_buffers = 256MB
-effective_cache_size = 1GB
-maintenance_work_mem = 64MB
-checkpoint_completion_target = 0.9
-wal_buffers = 16MB
-default_statistics_target = 100
-```
-
-2. **Redis Configuration**
-
-```bash
-# /etc/redis/redis.conf
-maxmemory 512mb
-maxmemory-policy allkeys-lru
-save 900 1
-save 300 10
-save 60 10000
-```
-
-3. **Nginx Optimization**
-
-```nginx
-# Add to server block
-gzip on;
-gzip_vary on;
-gzip_min_length 1024;
-gzip_types text/plain text/css text/xml text/javascript application/javascript application/xml+rss application/json;
-
-# Caching
-location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
-    expires 1y;
-    add_header Cache-Control "public, immutable";
-}
-```
-
-## Monitoring and Maintenance
-
-### Health Checks
-
-1. **Application Health**
-
-```bash
-# API health check
-curl -f http://localhost:8000/api/health/
-
-# Database connection
-docker-compose exec backend python manage.py dbshell --command "SELECT 1;"
-```
-
-2. **Service Monitoring**
-
-Create `monitor.sh`:
-
-```bash
-#!/bin/bash
-
-# Check if services are running
-services=("db" "redis" "backend" "celery_worker" "celery_beat")
-
-for service in "${services[@]}"; do
-    if docker-compose ps | grep -q "$service.*Up"; then
-        echo "✓ $service is running"
-    else
-        echo "✗ $service is down"
-    fi
-done
-```
-
-### Log Management
-
-1. **Log Rotation**
-
-Create `/etc/logrotate.d/financial-analytics`:
-
-```
-/path/to/backend/logs/*.log {
-    daily
-    missingok
-    rotate 52
-    compress
-    delaycompress
-    notifempty
-    create 644 www-data www-data
-    postrotate
-        docker-compose restart backend
-    endscript
-}
-```
-
-2. **Centralized Logging**
-
-```bash
-# View logs
-docker-compose logs -f backend
-docker-compose logs -f celery_worker
-```
-
-### Backup Strategy
-
-1. **Database Backup**
-
-```bash
-#!/bin/bash
-# backup.sh
-DATE=$(date +%Y%m%d_%H%M%S)
-BACKUP_DIR="/backups/financial-analytics"
-
-docker-compose exec -T db pg_dump -U postgres financial_analytics > "$BACKUP_DIR/db_backup_$DATE.sql"
-
-# Keep last 30 days
-find $BACKUP_DIR -name "db_backup_*.sql" -mtime +30 -delete
-```
-
-2. **Media Backup**
-
-```bash
-#!/bin/bash
-# backup_media.sh
-rsync -av /path/to/backend/media/ /backups/financial-analytics/media/
-```
-
-### Scaling Considerations
-
-1. **Horizontal Scaling**
-
-```yaml
-# docker-compose.prod.yml
-services:
-  backend:
-    deploy:
-      replicas: 3
-  
-  celery_worker:
-    deploy:
-      replicas: 2
-```
-
-2. **Load Balancing**
-
-```nginx
-upstream backend {
-    server backend1:8000;
-    server backend2:8000;
-    server backend3:8000;
-}
-
-server {
-    location /api {
-        proxy_pass http://backend;
-    }
-}
-```
-
-## Troubleshooting
-
-### Common Issues
-
-1. **Database Connection Errors**
-
-```bash
-# Check database status
-docker-compose exec db pg_isready
-
-# Check logs
-docker-compose logs db
-```
-
-2. **Celery Task Issues**
-
-```bash
-# Check worker status
-docker-compose exec celery_worker celery -A financial_analytics inspect active
-
-# Clear queue
-docker-compose exec celery_worker celery -A financial_analytics purge
-```
-
-3. **Frontend Build Issues**
-
-```bash
-# Clear cache
-rm -rf node_modules package-lock.json
-npm install
-npm run build
-```
-
-### Performance Issues
-
-1. **Slow API Responses**
-
-```bash
-# Database queries
-docker-compose exec backend python manage.py dbshell --command "SELECT query, calls, total_time FROM pg_stat_statements ORDER BY total_time DESC LIMIT 10;"
-
-# Memory usage
-docker stats
-```
-
-2. **High Memory Usage**
-
-```bash
-# Check process memory
-docker-compose exec backend ps aux
-
-# Restart services
-docker-compose restart backend celery_worker
-```
-
-## Maintenance Tasks
-
-### Regular Maintenance
-
-1. **Daily Tasks**
-
-```bash
-# Health check
-./monitor.sh
-
-# Log cleanup
-find /var/log -name "*.log" -mtime +7 -delete
-```
-
-2. **Weekly Tasks**
-
-```bash
-# Database maintenance
-docker-compose exec backend python manage.py dbshell --command "VACUUM ANALYZE;"
-
-# Update dependencies
-cd backend && pip install -r requirements.txt --upgrade
-cd frontend && npm update
-```
-
-3. **Monthly Tasks**
-
-```bash
-# Security updates
-sudo apt update && sudo apt upgrade
-
-# Certificate renewal check
-sudo certbot renew --dry-run
-```
-
-### Emergency Procedures
-
-1. **Service Recovery**
-
-```bash
-# Restart all services
-docker-compose restart
-
-# Full rebuild
-docker-compose down
-docker-compose up -d --build
-```
-
-2. **Data Recovery**
-
-```bash
-# Restore database
-docker-compose exec -T db psql -U postgres financial_analytics < backup.sql
-```
-
-This deployment guide provides comprehensive instructions for deploying and maintaining the AI Financial Analytics System in production environments.
+## Security checklist
+
+- [ ] `DEBUG=False`, a generated `SECRET_KEY`, and `ALLOWED_HOSTS` / `CORS_ALLOWED_ORIGINS` set to your domain only
+- [ ] `backend/.env` readable only by the service user (`chmod 600`)
+- [ ] HTTPS working, then `SECURE_HSTS_SECONDS` raised
+- [ ] `check --deploy` shows no errors
+- [ ] Database backups running and a restore tested
+- [ ] `OPENAI_DAILY_QUOTA_LIMIT` and `AI_REQUESTS_PER_USER_PER_HOUR` set to what you can afford
+- [ ] An OpenAI spending limit set in the OpenAI dashboard as a second safeguard
+
+## Limits
+
+- **Report generation is synchronous.** An upload holds a Gunicorn thread until OpenAI answers (up to about 3 minutes in the worst case). With the defaults (up to 8 workers × 4 threads) that is fine for a small team; heavier use needs a background job queue.
+- **Each report stores the whole uploaded file** in the database, so storage grows with upload size. The retention cleanup job keeps this in check.

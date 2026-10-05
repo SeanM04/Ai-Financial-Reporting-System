@@ -96,8 +96,10 @@ def cleanup_old_reports(user=None, dry_run=False):
         cutoff_date = timezone.now() - timedelta(days=retention_days)
         
         # Get reports older than retention period
+        # Regular users only clean up their own reports; staff also clear unowned ones.
+        owner_q = Q(owner=user) | Q(owner__isnull=True) if user.is_staff else Q(owner=user)
         old_reports = PersistedReport.objects.filter(
-            Q(owner=user) | Q(owner__isnull=True),
+            owner_q,
             created_at__lt=cutoff_date,
             is_archived=False,
         )

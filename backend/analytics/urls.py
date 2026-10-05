@@ -4,7 +4,7 @@ URL configuration for analytics API endpoints
 
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .api.auth import current_user_view, login_view, simple_login_view
+from .api.auth import current_user_view, simple_login_view
 from .api.reports import (
     BenchmarkComparisonView,
     CustomReportView,
@@ -79,8 +79,8 @@ urlpatterns = [
     path('simple-login/', simple_login_view, name='simple_login'),
     path('auth/me/', current_user_view, name='current_user'),
     
-    # Authentication
-    path('auth/login/', login_view, name='login'),
+    # Authentication (same throttled view as simple-login/)
+    path('auth/login/', simple_login_view, name='login'),
     
     # File upload and analysis
     path('simple-upload/', simple_upload_view, name='simple_upload'),

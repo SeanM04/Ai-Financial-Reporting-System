@@ -6,17 +6,10 @@ import os
 import logging
 from celery import Celery
 from celery.schedules import crontab
-from django.conf import settings
 
-# Set default Django settings
-settings_module = os.environ.get('DJANGO_SETTINGS_MODULE')
-if not settings_module:
-    settings_module = (
-        'financial_analytics.settings_postgres'
-        if os.environ.get('DB_NAME') or os.environ.get('DATABASE_URL')
-        else 'financial_analytics.settings_sqlite'
-    )
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', settings_module)
+from .env import configure_settings_module
+
+configure_settings_module()
 
 logger = logging.getLogger(__name__)
 

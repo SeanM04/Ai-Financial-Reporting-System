@@ -1,19 +1,13 @@
 #!/usr/bin/env python
 """Django's command-line utility for administrative tasks."""
-import os
 import sys
 
 
 def main():
     """Run administrative tasks."""
-    settings_module = os.environ.get('DJANGO_SETTINGS_MODULE')
-    if not settings_module:
-        settings_module = (
-            'financial_analytics.settings_postgres'
-            if os.environ.get('DB_NAME') or os.environ.get('DATABASE_URL')
-            else 'financial_analytics.settings_sqlite'
-        )
-    os.environ.setdefault('DJANGO_SETTINGS_MODULE', settings_module)
+    # Loads backend/.env and picks settings_postgres or settings_sqlite.
+    from financial_analytics.env import configure_settings_module
+    configure_settings_module()
     try:
         from django.core.management import execute_from_command_line
     except ImportError as exc:
